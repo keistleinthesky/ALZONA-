@@ -1,0 +1,27 @@
+{
+  "_comment": "Measured from the recorded SATB takes by scripts/analyze_harmony. Regenerate if the recordings are replaced.",
+  "song": "Lupang Hinirang",
+  "duration": 72.5,
+  "sample_rate": 44100,
+  "lead_in": 0.63,
+  "_lead_in_note": "Seconds of silence before the first sung note. Playback starts here so the downbeat lands with the singer.",
+  "tempo_bpm": 84,
+  "beats_per_bar": 4,
+  "phrase_period": 2.86,
+  "tuning_cents_vs_a440": -20.9,
+  "_tuning_note": "The takes sit ~21 cents below concert pitch (implied A=434.7Hz). ALZONA sounds the start note before the count-in so the singer matches the recording rather than a tuner.",
+  "parts": {
+    "soprano": { "file": "soprano.mp3", "start_note": "G4", "start_hz": 385.4 },
+    "alto":    { "file": "alto.mp3",    "start_note": "D4", "start_hz": 290.1 },
+    "tenor":   { "file": "tenor.mp3",   "start_note": "B3", "start_hz": 244.5 },
+    "bass":    { "file": "bass.mp3",    "start_note": "G3", "start_hz": 194.2 }
+  },
+  "_boundaries_note": "Gaps present in EVERY part - safe places to stop the ensemble without cutting a word.",
+  "phrase_boundaries": [6.16, 11.98, 18.10, 29.54, 35.30, 41.44, 47.34, 53.48, 59.18, 65.62],
+  "demo_lengths": {
+    "phrase": 6.16,
+    "quarter": 18.10,
+    "half": 35.30,
+    "full": 72.5
+  }
+}

@@ -1,0 +1,63 @@
+# =============================================================================
+# SECRETS — never commit these
+# =============================================================================
+# .env holds live Gemini and ElevenLabs API keys; the JSON is a Google Cloud
+# service-account private key. Use .env.example as the template instead.
+.env
+.env.*
+!.env.example
+*.json.key
+dyciroboticsteam-*.json
+*-service-account*.json
+
+# =============================================================================
+# Environments and dependencies — reinstall these, don't store them
+# =============================================================================
+gsp-env/
+gsp-env.broken/
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# =============================================================================
+# Large binaries — 570 MB of media and models that git handles badly.
+# Keep them out of history; distribute separately (Drive / release assets).
+# =============================================================================
+# Pre-trained face/age/gender nets (~87 MB)
+*.caffemodel
+# Trained gesture model and its training data (~27 MB)
+*.pkl
+hand_gesture_data.csv
+# Folk-dance and promo footage (~455 MB)
+source/videos/
+johan/
+*.mp4
+*.avi
+*.mov
+
+# =============================================================================
+# Generated at runtime
+# =============================================================================
+static/tts/
+static/baybayin/
+uploads/
+dycinovus/dist/
+*.log
+
+# =============================================================================
+# Editor / OS
+# =============================================================================
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local Claude Code permissions — records shell commands verbatim, which can
+# include API keys typed on the command line.
+.claude/settings.local.json
+
+# Generated code bundle - regenerate with scripts, don't version it.
+ALZONA_source_code.txt

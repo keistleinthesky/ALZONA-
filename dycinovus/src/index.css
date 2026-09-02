@@ -1,0 +1,5 @@
+@import "tailwindcss";
+
+.solid_background {
+  background-color: var(--background);
+}
