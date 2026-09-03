@@ -49,9 +49,13 @@ const RESUME_VOICE = 0.18
 // compete with the face detector for CPU. Sung notes last well over 50ms.
 const IDLE_ANALYSIS_INTERVAL = 0.05
 
-// Give up auto-starting after this many consecutive failures, so a denied
-// microphone becomes one message instead of an endless retry.
-const MAX_ARM_FAILURES = 3
+// Auto-start retries for as long as the panel is open, backing off so a denied
+// microphone is not a hot loop. It must never give up permanently: a listener
+// that stops trying looks exactly like a broken robot, and the failures that
+// get it there are usually transient (the backend restarting, the microphone
+// briefly held by something else). The delay climbs to this ceiling and stays.
+const ARM_RETRY_MIN = 600
+const ARM_RETRY_MAX = 8000
 
 // How long to trust a lyric hint that is not producing a match. Beyond this the
 // hint was wrong, and keeping it would block matching for good.
@@ -158,6 +162,8 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [heardSong, setHeardSong] = useState(null)
   const [diag, setDiag] = useState(null)
   const [device, setDevice] = useState(null)
+  // Bumped on every failed arm so the retry effect actually re-runs.
+  const [armTick, setArmTick] = useState(0)
 
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
@@ -338,7 +344,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
 
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 2048
-      ctx.createMediaStreamSource(stream).connect(analyser)
+      ctx.createMediaStreamSource(mic.stream).connect(analyser)
       analyserRef.current = analyser
       bufRef.current = new Float32Array(analyser.fftSize)
 
@@ -533,13 +539,20 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
           if (nowMs - lastSent > 1000) {
             lastSent = nowMs
             const fd = new FormData()
+            // The note sequence itself, not just how many there were. Whether a
+            // failed match is a bad detector or simply someone talking is not
+            // decidable from a count, and guessing between those two has cost
+            // more rounds of this than anything else.
+            const seq = notes.slice(-10).map((nt) => nt.midi).join(',')
             fd.append('line',
               `lvl=${lvl.toFixed(4)} gate=${gate.toFixed(4)} ` +
               `hz=${hz > 0 ? hz.toFixed(0) : '-'} clar=${clarity.toFixed(2)} ` +
               `distinct=${distinct.length}/${MIN_DISTINCT_TO_MATCH} ` +
               `lyric=${lyricWindowRef.current ? 'Y' : 'n'} ` +
               `matched=${matchRef.current ? matchRef.current.time.toFixed(1) + 's' : 'no'} ` +
-              `self=${selfHeard ? 'Y' : 'n'}`)
+              `self=${selfHeard ? 'Y' : 'n'} ` +
+              `mode=${modeRef.current} parts=${partsRef.current.join('+') || '-'} ` +
+              `notes=[${seq}]`)
             fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
           }
         }
@@ -552,8 +565,17 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
       armFailuresRef.current += 1
       setStatus(err?.name === 'NotAllowedError'
         ? 'Microphone blocked — allow it in the browser, then reload.'
-        : `Could not start: ${err.message}`)
+        : `Could not start (${err.name || 'error'}) — retrying.`)
+      // Send it: a silent arm failure was indistinguishable from a working
+      // listener that simply never heard anything.
+      try {
+        const fd = new FormData()
+        fd.append('line', `ARM FAILED #${armFailuresRef.current} `
+          + `${err?.name || 'error'}: ${String(err?.message || '').slice(0, 120)}`)
+        fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
+      } catch { /* telemetry must never break the retry */ }
       teardown()
+      setArmTick((t) => t + 1)
     } finally {
       startingRef.current = false
     }
@@ -562,12 +584,15 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   // ALWAYS listening. Detecting singing on its own is the whole feature, so
   // there is nothing to press and nothing to say first.
   useEffect(() => {
-    if (listening || armFailuresRef.current >= MAX_ARM_FAILURES) return undefined
-    const delay = autoStartedRef.current ? 1500 : 600
+    if (listening) return undefined
+    const n = armFailuresRef.current
+    const delay = autoStartedRef.current
+      ? Math.min(ARM_RETRY_MIN * 2 ** n, ARM_RETRY_MAX)
+      : ARM_RETRY_MIN
     autoStartedRef.current = true
     const id = setTimeout(() => { start() }, delay)
     return () => clearTimeout(id)
-  }, [listening, start])
+  }, [listening, start, armTick])
 
   // Any interaction is enough to let audio play; take the first one we get.
   useEffect(() => {
@@ -599,9 +624,21 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
           <p className="text-xs uppercase tracking-[0.35em] text-white/50">Lupang Hinirang</p>
           <h2 className="mt-1 text-lg font-bold text-white">Sing &amp; Harmonise</h2>
         </div>
-        <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
-          {listening ? 'listening' : 'idle'}
-        </div>
+        {listening ? (
+          <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
+            listening
+          </div>
+        ) : (
+          // Always-listening is the feature, but when arming fails there has to
+          // be something to press. Without it the only cure was a page reload.
+          <button
+            type="button"
+            onClick={() => { armFailuresRef.current = 0; start() }}
+            className="rounded-full border border-amber-400/40 bg-amber-400/15 px-3 py-1 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/25"
+          >
+            Start listening
+          </button>
+        )}
       </div>
 
       <div className="mt-3 flex gap-2">

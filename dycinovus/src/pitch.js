@@ -17,6 +17,10 @@ export const SATB_OFFSETS = { soprano: 0, alto: -5, tenor: -12, bass: -24 }
 export const REFERENCE_HZ = 392.0 // G4
 
 // Singing sits roughly here; anything outside is noise, not a sung note.
+// How close a peak must come to the best one to be preferred for being
+// earlier. 0.9 is McLeod's figure and it is what keeps octaves honest.
+const OCTAVE_TOLERANCE = 0.9
+
 const MIN_HZ = 65 // C2
 const MAX_HZ = 1200 // ~D6
 
@@ -78,38 +82,66 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
   const n = trimmed.length
   if (n < 512) return { hz: -1, clarity: 0, rms }
 
-  const c = new Float32Array(n).fill(0)
+  // Normalised square difference (McLeod), not plain autocorrelation.
+  //
+  // Plain autocorrelation sums fewer products as the lag grows, so its values
+  // taper off with lag. Taking the strongest peak then favours SHORT lags, and
+  // a sung vowel correlates strongly at half its true period — which is how the
+  // detector reported 743Hz for a note an octave lower. Dividing by the energy
+  // actually involved at each lag removes that bias entirely and bounds the
+  // result in [-1, 1], so the clarity figure means something absolute.
+  const nsdf = new Float32Array(n)
   for (let lag = 0; lag < n; lag += 1) {
-    let sum = 0
-    for (let i = 0; i < n - lag; i += 1) sum += trimmed[i] * trimmed[i + lag]
-    c[lag] = sum
-  }
-
-  // Walk past the zero-lag peak, then take the highest following peak.
-  let d = 0
-  while (d < n - 1 && c[d] > c[d + 1]) d += 1
-  let maxVal = -1
-  let maxPos = -1
-  for (let i = d; i < n; i += 1) {
-    if (c[i] > maxVal) {
-      maxVal = c[i]
-      maxPos = i
+    let ac = 0
+    let energy = 0
+    for (let i = 0; i < n - lag; i += 1) {
+      const a = trimmed[i]
+      const b = trimmed[i + lag]
+      ac += a * b
+      energy += a * a + b * b
     }
+    nsdf[lag] = energy > 0 ? (2 * ac) / energy : 0
   }
-  if (maxPos <= 0) return { hz: -1, clarity: 0, rms }
 
-  // Parabolic interpolation around the peak — without this the reported pitch
+  // Peak per positive region, after stepping off the zero-lag hump.
+  let i = 0
+  while (i < n - 1 && nsdf[i] > 0) i += 1
+  const peaks = []
+  while (i < n - 1) {
+    if (nsdf[i] <= 0) { i += 1; continue }
+    let at = i
+    while (i < n - 1 && nsdf[i] > 0) {
+      if (nsdf[i] > nsdf[at]) at = i
+      i += 1
+    }
+    peaks.push(at)
+  }
+  if (!peaks.length) return { hz: -1, clarity: 0, rms }
+
+  // The EARLIEST peak that is nearly as good as the best one, rather than the
+  // best outright. The octave above always produces a peak of its own; when it
+  // happens to edge ahead, preferring the best halves the reported period and
+  // the harmony comes out an octave wrong while still looking confident.
+  let best = peaks[0]
+  for (const p of peaks) if (nsdf[p] > nsdf[best]) best = p
+  const cutoff = nsdf[best] * OCTAVE_TOLERANCE
+  let maxPos = best
+  for (const p of peaks) {
+    if (nsdf[p] >= cutoff) { maxPos = p; break }
+  }
+
+  // Parabolic interpolation around the peak - without this the reported pitch
   // quantises to the sample grid and the harmony drifts audibly sharp/flat.
   let T = maxPos
-  const x1 = c[maxPos - 1] ?? c[maxPos]
-  const x2 = c[maxPos]
-  const x3 = c[maxPos + 1] ?? c[maxPos]
+  const x1 = nsdf[maxPos - 1] ?? nsdf[maxPos]
+  const x2 = nsdf[maxPos]
+  const x3 = nsdf[maxPos + 1] ?? nsdf[maxPos]
   const a = (x1 + x3 - 2 * x2) / 2
   const b = (x3 - x1) / 2
   if (a !== 0) T = maxPos - b / (2 * a)
 
   const hz = sampleRate / T
-  const clarity = c[0] > 0 ? maxVal / c[0] : 0
+  const clarity = Math.max(0, Math.min(1, nsdf[maxPos]))
   if (hz < MIN_HZ || hz > MAX_HZ || clarity < 0.5) return { hz: -1, clarity, rms }
   return { hz, clarity, rms }
 }
