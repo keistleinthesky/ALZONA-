@@ -46,17 +46,30 @@ export function noteLabel(hz) {
  * @returns {{hz: number, clarity: number, rms: number}} hz is -1 when no
  *   confident pitch was found (silence, noise, or out of singing range).
  */
-export function detectPitch(buf, sampleRate) {
+export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
   const SIZE = buf.length
 
-  // Gate on RMS so silence and room noise never register as a note.
   let rms = 0
-  for (let i = 0; i < SIZE; i += 1) rms += buf[i] * buf[i]
+  let peak = 0
+  for (let i = 0; i < SIZE; i += 1) {
+    rms += buf[i] * buf[i]
+    const a = Math.abs(buf[i])
+    if (a > peak) peak = a
+  }
   rms = Math.sqrt(rms / SIZE)
-  if (rms < 0.012) return { hz: -1, clarity: 0, rms }
+  // No fixed level gate: microphone gain varies by an order of magnitude
+  // between machines. Callers pass a floor learned from the room (NoiseFloor);
+  // this only rejects true silence.
+  if (rms < noiseFloor) return { hz: -1, clarity: 0, rms }
 
   // Trim leading/trailing near-silence to sharpen the correlation.
-  const threshold = 0.2
+  //
+  // This threshold MUST be relative to the signal. It was a fixed 0.2, which is
+  // louder than a typical microphone ever reaches: for any quieter input both
+  // walks met in the middle, leaving nothing to correlate, and the detector
+  // reported no pitch at all. It only ever worked on loud synthetic test tones,
+  // which is exactly why every test passed while the feature was deaf.
+  const threshold = peak * 0.2
   let start = 0
   let end = SIZE - 1
   while (start < SIZE / 2 && Math.abs(buf[start]) < threshold) start += 1
@@ -99,4 +112,53 @@ export function detectPitch(buf, sampleRate) {
   const clarity = c[0] > 0 ? maxVal / c[0] : 0
   if (hz < MIN_HZ || hz > MAX_HZ || clarity < 0.5) return { hz: -1, clarity, rms }
   return { hz, clarity, rms }
+}
+
+// A frame this many times the current floor is the singer, not the room, and is
+// ignored when learning the floor.
+const LOUD_MULTIPLE = 2.5
+// The gate never rises above this. Real singing measures 0.02-0.3 RMS, so a
+// gate beyond this point can only be wrong.
+const MAX_GATE = 0.012
+
+/**
+ * Learns how quiet the room is, so "is anything happening?" adapts to the
+ * microphone instead of assuming a level.
+ *
+ * Two failures this exists to prevent, both seen on real hardware:
+ *  - a FIXED threshold chosen on one machine silently discarded every note on
+ *    another whose microphone ran ten times quieter;
+ *  - a floor that learns from every frame gets dragged up by the singing
+ *    itself. Logged live, the gate walked from 0.003 to 0.042 in ten seconds
+ *    and began rejecting the very voice it was listening for.
+ */
+export class NoiseFloor {
+  constructor({ margin = 2.0, floor = 1.5e-4, adapt = 0.02 } = {}) {
+    this.margin = margin
+    this.hardFloor = floor
+    this.adapt = adapt
+    this.quiet = null
+  }
+
+  /** Feed the RMS of a frame; returns the level to gate on. */
+  update(rms) {
+    if (this.quiet === null) {
+      this.quiet = rms
+      return this.threshold
+    }
+    if (rms < this.quiet) {
+      this.quiet += (rms - this.quiet) * 0.25          // fall quickly
+    } else if (rms < this.quiet * LOUD_MULTIPLE) {
+      this.quiet += (rms - this.quiet) * this.adapt    // creep up from background
+    }
+    // Louder than that is the singer, and must not move the floor at all.
+    return this.threshold
+  }
+
+  get threshold() {
+    return Math.min(
+      MAX_GATE,
+      Math.max(this.hardFloor, (this.quiet ?? 0) * this.margin),
+    )
+  }
 }
