@@ -1,0 +1,28 @@
+{
+  "_comment": "Lyric lines aligned to the soprano recording. Times are seconds from the start of the file, the same clock as contours.json. Derived by syllable-weighted fitting of the lines to the sung stretches, then confirmed by the singer.",
+  "song": "Lupang Hinirang",
+  "source": "soprano.mp3",
+  "_caveat": "Line assignment confirmed; the closing line is NOT repeated. The last two rows have unusual syllable rates simply because the final line is drawn out, so their boundaries are the least precise. Lyrics are a SUPPORTING signal for position finding, never authoritative — an imprecise boundary costs a little speed, never a wrong entry.",
+  "lines": [
+    { "t": 0.62,  "end": 3.20,  "text": "Bayang magiliw" },
+    { "t": 3.58,  "end": 6.16,  "text": "Perlas ng Silanganan" },
+    { "t": 6.68,  "end": 9.20,  "text": "Alab ng puso" },
+    { "t": 9.52,  "end": 11.98, "text": "Sa dibdib mo'y buhay" },
+    { "t": 12.62, "end": 15.22, "text": "Lupang Hinirang" },
+    { "t": 15.60, "end": 18.10, "text": "Duyan ka ng magiting" },
+    { "t": 18.62, "end": 21.20, "text": "Sa manlulupig" },
+    { "t": 21.62, "end": 23.44, "text": "'Di ka pasisiil" },
+    { "t": 23.68, "end": 25.94, "text": "Sa dagat at bundok" },
+    { "t": 26.12, "end": 29.54, "text": "Sa simoy at sa langit mong bughaw" },
+    { "t": 29.88, "end": 31.92, "text": "May dilag ang tula" },
+    { "t": 32.12, "end": 36.44, "text": "At awit sa paglayang minamahal" },
+    { "t": 36.64, "end": 41.44, "text": "Ang kislap ng watawat mo'y" },
+    { "t": 41.86, "end": 45.04, "text": "Tagumpay na nagniningning" },
+    { "t": 45.34, "end": 48.48, "text": "Ang bituin at araw niya" },
+    { "t": 48.70, "end": 53.48, "text": "Kailan pa ma'y 'di magdidilim" },
+    { "t": 53.88, "end": 59.18, "text": "Lupa ng araw ng luwalhati't pagsinta" },
+    { "t": 59.78, "end": 63.26, "text": "Buhay ay langit sa piling mo" },
+    { "t": 63.68, "end": 65.62, "text": "Aming ligaya na 'pag may mang-aapi" },
+    { "t": 65.88, "end": 71.36, "text": "Ang mamatay ng dahil sa iyo" }
+  ]
+}
