@@ -1477,32 +1477,41 @@ def detect_sing_command(text):
 # The five fields ALZONA reports for a coin held up to the camera, in order.
 # Each is capped at ONE sentence — enforced in the prompt AND trimmed after,
 # because a vision model will happily write a paragraph about a coin.
-COIN_FIELDS = [
-    ("country",      "Nationality / Country",              "\U0001F1F5\U0001F1ED\U0001F1ED\U0001F1F7"),
-    ("denomination", "Currency & Denomination",            "\U0001F4B0"),
-    ("featured",     "Person / Symbol Featured",           "\U0001F464"),
-    ("significance", "Historical & Cultural Significance", "\U0001F3DB️"),
+# Order matters and is deliberate: authenticity is settled FIRST, because every
+# field after it is only worth reading if the coin is genuine.
+COIN_ORDER = [
+    ("authenticity",    "Real or Fake",                       "\U0001F50E"),
+    ("other_countries", "Used Elsewhere",                     "\U0001F30D"),
+    ("country",         "Nationality / Country",              "\U0001F4D6"),
+    ("denomination",    "Currency & Denomination",            "\U0001F4B0"),
+    ("featured",        "Person / Symbol Featured",           "\U0001F464"),
+    ("significance",    "Historical & Cultural Significance", "\U0001F3DB"),
 ]
 
-# Reported alongside the four descriptions rather than as one of them: these are
-# judgements about the coin, not descriptions of it.
-COIN_EXTRAS = [
-    ("authenticity",    "Real or Fake",  "\U0001F50E"),
-    ("other_countries", "Used Elsewhere", "\U0001F30D"),
-]
+# Not reported at all once a counterfeit is spotted. Every one of these
+# describes the REAL coin being imitated, not the object in front of the
+# camera, so answering them would dress a fake up in a genuine coin's history.
+# The country stays: which coin it is pretending to be is worth knowing.
+_SKIP_IF_FAKE = ("other_countries", "denomination", "featured", "significance")
+
 
 _COIN_PROMPT = """You are identifying a coin held up to a camera.
 
-Look at the coin in this image and report EXACTLY these six fields:
-1. country - the nation that issued it
-2. denomination - the currency and face value
-3. featured - the person, animal, or symbol shown on it
-4. significance - its historical and cultural significance
-5. authenticity - whether it looks genuine or counterfeit, and what tells you:
-   strike quality, lettering, edge, colour, wear. Say plainly when the image is
-   not clear enough to judge — a confident guess here is worse than no answer.
-6. other_countries - whether this same coin, or the same design or currency, is
+Decide FIRST whether the coin is genuine, then report the rest.
+
+1. verdict - exactly one word: real, fake, or unclear. Use "unclear" whenever
+   the image is not good enough to judge; a confident guess is worse than
+   admitting the picture will not support one.
+2. authenticity - what led you to that verdict: strike quality, lettering,
+   edge, colour, wear. If the verdict is "fake", say WHAT gives it away and
+   allow yourself one light, good-natured joke about it - amused, never
+   sneering, and never at the expense of the person holding it.
+3. other_countries - whether this same coin, or the same design or currency, is
    or was used in any other country. Say so plainly if it is used only here.
+4. country - the nation that issued it
+5. denomination - the currency and face value
+6. featured - the person, animal, or symbol shown on it
+7. significance - its historical and cultural significance
 
 Rules:
 - Reply with ONE SENTENCE per field. Never more than one sentence.
@@ -1510,19 +1519,22 @@ Rules:
 - If a detail is genuinely not visible (worn, blurred, face-down), say so in
   that field's sentence instead of guessing.
 - If the image contains NO coin at all, reply with exactly: NO_COIN
-- Return ONLY a JSON object with the keys: country, denomination, featured,
-  significance, authenticity, other_countries. No markdown, no code fence."""
+- Return ONLY a JSON object with the keys: verdict, authenticity,
+  other_countries, country, denomination, featured, significance.
+  No markdown, no code fence."""
 
 
-def _first_sentence(text, max_words=24):
-    """Coin fields are one sentence each — enforce that after the model replies."""
+def _first_sentence(text, max_words=24, sentences=1):
+    """Trim a coin field to `sentences` sentences - the model is asked for one,
+    and this holds it to that after the fact. A fake gets two: the giveaway,
+    then the joke about it."""
     t = " ".join(str(text or "").split())
     t = re.sub(r"[*#_`]+", "", t)
     parts = [p for p in re.split(r"(?<=[.!?])\s+", t) if p.strip()]
-    out = parts[0] if parts else t
+    out = " ".join(parts[:sentences]) if parts else t
     words = out.split()
-    if len(words) > max_words:
-        out = " ".join(words[:max_words]).rstrip(",;:—- ")
+    if len(words) > max_words * sentences:
+        out = " ".join(words[:max_words * sentences]).rstrip(",;:—- ")
         if out and out[-1] not in ".!?":
             out += "."
     return out.strip()
@@ -1549,13 +1561,24 @@ def identify_coin(jpeg_bytes):
             if not m:
                 return {"ok": False, "error": "I couldn't read that coin clearly."}
             data = json.loads(m.group(0))
+        # One word the code can branch on, rather than re-reading the prose.
+        raw_verdict = str(data.get("verdict", "")).strip().lower()
+        verdict = next((v for v in ("fake", "real", "unclear") if v in raw_verdict),
+                       "unclear")
         fields = []
-        for key, label, emoji in COIN_FIELDS + COIN_EXTRAS:
+        for key, label, emoji in COIN_ORDER:
+            if verdict == "fake" and key in _SKIP_IF_FAKE:
+                continue
+            # The one-sentence rule holds everywhere except the verdict on a
+            # fake, which has to carry both the giveaway and the joke about it.
+            room = 2 if (verdict == "fake" and key == "authenticity") else 1
             fields.append({"key": key, "label": label, "emoji": emoji,
-                           "text": _first_sentence(data.get(key, ""))})
-        # One spoken line covering all five, so the voice reply matches the panel.
+                           "text": _first_sentence(data.get(key, ""),
+                                                   sentences=room)})
+        # One spoken line covering the panel, so the voice matches the screen.
         spoken = " ".join(f["text"] for f in fields if f["text"])
-        return {"ok": True, "fields": fields, "spoken": spoken}
+        return {"ok": True, "verdict": verdict,
+                "fields": fields, "spoken": spoken}
     except Exception as e:
         print("coin id error:", str(e)[:120])
         return {"ok": False, "error": "I had trouble identifying that coin."}

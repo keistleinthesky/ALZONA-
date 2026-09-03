@@ -39,7 +39,8 @@ function App() {
   const [mode, setMode] = useState('chat')
   const [knowledgeFiles, setKnowledgeFiles] = useState([])
   const [uploadingKnowledge, setUploadingKnowledge] = useState(false)
-  const [coinFields, setCoinFields] = useState(null)  // five coin descriptions
+  const [coinFields, setCoinFields] = useState(null)  // the coin rows to show
+  const [coinVerdict, setCoinVerdict] = useState(null)  // real / fake / unclear
   const [singCommand, setSingCommand] = useState(null) // armed by a spoken command
 
   const audioRef = useRef(null)
@@ -442,8 +443,10 @@ function App() {
           <Coin
             baseUrl={BASE_URL}
             fields={coinFields}
-            onResult={(fields, ttsUrl) => {
+            verdict={coinVerdict}
+            onResult={(fields, ttsUrl, verdict) => {
               setCoinFields(fields)
+              setCoinVerdict(verdict ?? null)
               if (ttsUrl) setAudioSrc(ttsUrl)
             }}
           />

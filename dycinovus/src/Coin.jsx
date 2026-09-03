@@ -8,18 +8,23 @@ import { useState } from 'react'
 // rows (rather than free prose) keeps the demo readable at a glance and makes a
 // missing field obvious.
 
+// The placeholder rows shown before the first scan. Authenticity leads: nothing
+// below it is worth reading until we know the coin is genuine.
+//
+// After a scan the panel renders whatever the BACKEND returned instead of this
+// list, because a counterfeit deliberately comes back short — describing a
+// fake's denomination or history would be describing the real coin it is
+// imitating, not the object on the camera.
 const FIELD_ORDER = [
-  { key: 'country', label: 'Nationality / Country', emoji: '🇵🇭🇭🇷' },
-  { key: 'denomination', label: 'Currency & Denomination', emoji: '💰' },
-  { key: 'featured', label: 'Person / Symbol Featured', emoji: '👤' },
-  { key: 'significance', label: 'Historical & Cultural Significance', emoji: '🏛️' },
-  // Judgements about the coin rather than descriptions of it, so they sit
-  // apart from the four categories above.
-  { key: 'authenticity', label: 'Real or Fake', emoji: '🔎' },
-  { key: 'other_countries', label: 'Used Elsewhere', emoji: '🌍' },
+  { key: 'authenticity', label: 'Real or Fake', emoji: '\u{1F50E}' },
+  { key: 'other_countries', label: 'Used Elsewhere', emoji: '\u{1F30D}' },
+  { key: 'country', label: 'Nationality / Country', emoji: '\u{1F4D6}' },
+  { key: 'denomination', label: 'Currency & Denomination', emoji: '\u{1F4B0}' },
+  { key: 'featured', label: 'Person / Symbol Featured', emoji: '\u{1F464}' },
+  { key: 'significance', label: 'Historical & Cultural Significance', emoji: '\u{1F3DB}' },
 ]
 
-export default function Coin({ baseUrl, fields, onResult }) {
+export default function Coin({ baseUrl, fields, verdict, onResult }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
 
@@ -31,10 +36,11 @@ export default function Coin({ baseUrl, fields, onResult }) {
       const data = await res.json()
       if (!data.ok) {
         setError(data.error || 'Could not identify the coin.')
-        onResult?.(null, null)
+        onResult?.(null, null, null)
         return
       }
-      onResult?.(data.fields, data.tts_url ? `${baseUrl}${data.tts_url}` : null)
+      onResult?.(data.fields, data.tts_url ? `${baseUrl}${data.tts_url}` : null,
+                 data.verdict)
     } catch (err) {
       console.error('Coin identify failed:', err)
       setError('Backend unreachable.')
@@ -43,9 +49,10 @@ export default function Coin({ baseUrl, fields, onResult }) {
     }
   }
 
-  // Show whatever the backend returned, falling back to the fixed order so the
-  // five rows are always visible even before the first scan.
-  const byKey = Object.fromEntries((fields || []).map((f) => [f.key, f]))
+  // Follow the backend once it has answered; the fixed list is only the empty
+  // state. Rows it leaves out are ones it declined to assess, not missing data.
+  const rows = fields?.length ? fields : FIELD_ORDER
+  const fake = /^fake$/i.test(verdict || '')
 
   return (
     <section className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.06)] p-4 shadow-2xl shadow-black/20 backdrop-blur-sm">
@@ -71,10 +78,17 @@ export default function Coin({ baseUrl, fields, onResult }) {
       {error && <p className="mt-2 text-xs text-rose-300">{error}</p>}
 
       <div className="mt-3 space-y-2">
-        {FIELD_ORDER.map(({ key, label, emoji }) => {
-          const got = byKey[key]
+        {rows.map(({ key, label, emoji, text }) => {
+          const got = text ? { text } : null
           return (
-            <div key={key} className="rounded-xl border border-white/10 bg-black/20 px-3 py-2">
+            <div
+              key={key}
+              className={`rounded-xl border px-3 py-2 ${
+                fake && key === 'authenticity'
+                  ? 'border-rose-400/40 bg-rose-500/10'
+                  : 'border-white/10 bg-black/20'
+              }`}
+            >
               <p className="text-[10px] uppercase tracking-widest text-white/40">
                 {emoji} {label}
               </p>
