@@ -1,55 +1,106 @@
 import { useEffect, useRef } from 'react'
+import { PART_COLORS, USER_COLOR } from './partColors'
 
 // =============================================================================
-// Live pitch chart: your voice against each harmony part, colour-coded.
+// Two voices drawn as pitch curves
 // =============================================================================
-// Canvas rather than SVG because this redraws every frame — a few hundred DOM
-// nodes per frame would drop the framerate and make the singer's line stutter.
-
-export const PART_COLORS = {
-  soprano: '#f472b6', // pink
-  alto: '#a78bfa', // violet
-  tenor: '#38bdf8', // sky
-  bass: '#34d399', // emerald
-}
-export const USER_COLOR = '#fbbf24' // amber — deliberately unlike the parts
+// The singer's line and ALZONA's, on one note grid, so the interval between
+// them is visible directly rather than inferred. Both are smooth continuous
+// curves: a sung line is a shape, and two shapes are far easier to read against
+// each other than two rows of blocks.
+//
+// Canvas rather than SVG because this redraws every frame — hundreds of DOM
+// nodes per frame would stutter the singer's own line, the one thing that has
+// to feel immediate.
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-const midiName = (m) => `${NOTE_NAMES[((m % 12) + 12) % 12]}${Math.floor(m / 12) - 1}`
+const noteName = (m) => NOTE_NAMES[((m % 12) + 12) % 12]
+// With the octave — "A3" not "A" — so two lines an octave apart are
+// distinguishable, which the bare name on the axis cannot show.
+const fullName = (m) => `${noteName(m)}${Math.floor(m / 12) - 1}`
 
-// Seconds of history on screen. ~6s is enough to see the shape of a phrase
-// without squashing the notes together.
+// Only name a note that is actually held; labelling every passing pitch turns
+// the chart into a wall of text.
+const LABEL_MIN_SEC = 0.28
+
+// Seconds on screen, and how much sits AHEAD of the playhead so notes appear a
+// moment before they have to be sung — a cue, not just a record.
 const WINDOW = 6
-// Part of the window sits AHEAD of the playhead so notes appear a moment before
-// you have to sing them — the display is a cue, not just a record.
 const LOOKAHEAD = 1.5
 
+// Keep the vertical range wide enough that a held note does not fill the height,
+// and narrow enough that the note labels stay readable.
+const MIN_SPAN = 12
+const MAX_SPAN = 26
+
+/** Draw a note name with a dark outline so it stays legible over any line. */
+function label(ctx, text, x, y) {
+  ctx.font = 'bold 15px ui-sans-serif, system-ui, sans-serif'
+  ctx.textBaseline = 'bottom'
+  ctx.lineWidth = 4
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)'
+  ctx.strokeText(text, x, y)
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText(text, x, y)
+}
+
+/** Smooth a polyline by curving through the midpoints between samples. */
+function strokeSmooth(ctx, pts) {
+  if (pts.length < 2) return
+  ctx.beginPath()
+  ctx.moveTo(pts[0].x, pts[0].y)
+  for (let i = 1; i < pts.length - 1; i += 1) {
+    const mx = (pts[i].x + pts[i + 1].x) / 2
+    const my = (pts[i].y + pts[i + 1].y) / 2
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, mx, my)
+  }
+  const last = pts[pts.length - 1]
+  ctx.lineTo(last.x, last.y)
+  ctx.stroke()
+}
+
 /**
- * @param {number|null} userMidi   the singer's current pitch, as a MIDI number
- * @param {string[]}    parts      which harmony parts are sounding
- * @param {object}      contours   {part: {notes: [{t, d, midi, name}]}}
- * @param {number}      playhead   position in the recording, seconds
- * @param {boolean}     running    whether to keep collecting history
+ * Stretches where the live line sits on one note long enough to be worth
+ * naming. A singer's pitch wanders, so this groups by rounded semitone rather
+ * than looking for exact repeats.
  */
+function heldNotes(hist, minSec = LABEL_MIN_SEC) {
+  const out = []
+  let run = null
+  for (const pt of hist) {
+    const m = Math.round(pt.midi)
+    if (run && run.midi === m) run.end = pt.t
+    else {
+      if (run && run.end - run.start >= minSec) out.push(run)
+      run = { midi: m, start: pt.t, end: pt.t }
+    }
+  }
+  if (run && run.end - run.start >= minSec) out.push(run)
+  return out
+}
+
 export default function HarmonyChart({
   userMidi,
   parts,
   contours,
   playhead,
   running,
-  // Contour note times are measured from the START OF THE FILE, but playhead is
+  // Contour times are measured from the START OF THE FILE, but playhead is
   // measured from the FIRST SUNG NOTE. Without this the chart sits ~0.6s out of
-  // step with what you actually hear.
+  // step with what is actually heard.
   leadIn = 0,
 }) {
   const canvasRef = useRef(null)
-  const historyRef = useRef([]) // [{t, midi}] of the singer, t = playhead seconds
+  const historyRef = useRef([]) // [{t, midi}] of the singer
   const rafRef = useRef(null)
   const drawRef = useRef(null)
-  const stateRef = useRef({ userMidi, parts, contours, playhead, running })
+  const stateRef = useRef({})
 
-  // Keep the draw loop reading fresh values without restarting it every render.
-  stateRef.current = { userMidi, parts, contours, playhead, running, leadIn }
+  // Assigned in an effect rather than during render — writing a ref while
+  // rendering is a React anti-pattern, and the loop picks it up next frame.
+  useEffect(() => {
+    stateRef.current = { userMidi, parts, contours, playhead, running, leadIn }
+  })
 
   useEffect(() => {
     if (!running) historyRef.current = []
@@ -74,114 +125,105 @@ export default function HarmonyChart({
 
       if (s.running && s.userMidi) {
         historyRef.current.push({ t: s.playhead, midi: s.userMidi })
-        // Drop anything scrolled off the left edge.
         const cutoff = s.playhead + LOOKAHEAD - WINDOW
         while (historyRef.current.length && historyRef.current[0].t < cutoff) {
           historyRef.current.shift()
         }
       }
 
-      const t1 = s.playhead + LOOKAHEAD
+      const t1 = (s.playhead ?? 0) + LOOKAHEAD
       const t0 = t1 - WINDOW
+      const hist = historyRef.current
 
-      // Vertical range: cover every active part plus the singer, with padding,
-      // so nothing is ever drawn off the top or bottom of the box.
+      // ---- vertical range covering both voices ----
       let lo = 127
       let hi = 0
-      for (const p of s.parts) {
-        const notes = s.contours?.[p]?.notes
-        if (!notes) continue
-        for (const n of notes) {
+      for (const p of s.parts ?? []) {
+        for (const n of s.contours?.[p]?.notes ?? []) {
           const ns = n.t - s.leadIn
           if (ns + n.d < t0 || ns > t1) continue
           lo = Math.min(lo, n.midi)
           hi = Math.max(hi, n.midi)
         }
       }
-      for (const pt of historyRef.current) {
+      for (const pt of hist) {
         lo = Math.min(lo, pt.midi)
         hi = Math.max(hi, pt.midi)
       }
-      if (lo > hi) {
-        lo = 55
-        hi = 79
-      }
-      lo -= 3
-      hi += 3
-      if (hi - lo < 12) {
+      if (lo > hi) { lo = 55; hi = 67 }
+      lo -= 2
+      hi += 2
+      if (hi - lo < MIN_SPAN) {
         const mid = (hi + lo) / 2
-        lo = mid - 6
-        hi = mid + 6
+        lo = mid - MIN_SPAN / 2
+        hi = mid + MIN_SPAN / 2
       }
+      if (hi - lo > MAX_SPAN) hi = lo + MAX_SPAN
 
-      const padL = 34
-      const x = (t) => padL + ((t - t0) / WINDOW) * (w - padL - 6)
-      const y = (m) => h - 14 - ((m - lo) / (hi - lo)) * (h - 26)
+      const padL = 30
+      const x = (t) => padL + ((t - t0) / WINDOW) * (w - padL - 8)
+      const y = (m) => h - 10 - ((m - lo) / (hi - lo)) * (h - 20)
 
-      // Octave gridlines with note labels down the left.
+      // ---- note grid, every semitone where there is room ----
       ctx.font = '9px ui-monospace, monospace'
       ctx.textBaseline = 'middle'
+      const everySemitone = (h - 20) / (hi - lo) > 13
       for (let m = Math.ceil(lo); m <= hi; m += 1) {
-        if (m % 12 !== 0) continue // C of each octave
-        ctx.strokeStyle = 'rgba(255,255,255,0.10)'
+        const name = noteName(m)
+        const sharp = name.includes('#')
+        if (!everySemitone && sharp) continue
+        const yy = y(m)
+        ctx.strokeStyle = sharp ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.11)'
         ctx.lineWidth = 1
         ctx.beginPath()
-        ctx.moveTo(padL, y(m))
-        ctx.lineTo(w - 6, y(m))
+        ctx.moveTo(padL, yy)
+        ctx.lineTo(w - 8, yy)
         ctx.stroke()
-        ctx.fillStyle = 'rgba(255,255,255,0.35)'
-        ctx.fillText(midiName(m), 4, y(m))
+        ctx.fillStyle = sharp ? 'rgba(255,255,255,0.30)' : 'rgba(255,255,255,0.65)'
+        ctx.fillText(name, 4, yy)
       }
 
-      // Harmony parts: each note is a horizontal bar for its duration, which
-      // reads more like a score than a connected line would.
-      for (const p of s.parts) {
-        const notes = s.contours?.[p]?.notes
-        if (!notes) continue
-        ctx.strokeStyle = PART_COLORS[p] ?? '#888'
-        ctx.lineWidth = 4
-        ctx.lineCap = 'round'
+      ctx.lineCap = 'round'
+      ctx.lineJoin = 'round'
+
+      // ---- ALZONA's line ----
+      // Held notes become flat runs joined by smooth transitions, which is what
+      // gives the curve its shape rather than a row of separate bars.
+      for (const p of s.parts ?? []) {
+        const notes = s.contours?.[p]?.notes ?? []
+        const pts = []
         for (const n of notes) {
           const ns = n.t - s.leadIn
           const ne = ns + n.d
           if (ne < t0 || ns > t1) continue
-          ctx.globalAlpha = ns > s.playhead ? 0.45 : 1 // notes not yet reached are dimmer
-          ctx.beginPath()
-          ctx.moveTo(x(Math.max(ns, t0)), y(n.midi))
-          ctx.lineTo(x(Math.min(ne, t1)), y(n.midi))
-          ctx.stroke()
+          pts.push({ x: x(Math.max(ns, t0)), y: y(n.midi) })
+          pts.push({ x: x(Math.min(ne, t1)), y: y(n.midi) })
         }
-        ctx.globalAlpha = 1
+        if (pts.length < 2) continue
+        ctx.strokeStyle = PART_COLORS[p] ?? '#f472b6'
+        ctx.lineWidth = 5
+        strokeSmooth(ctx, pts)
+        for (const n of notes) {
+          const ns = n.t - s.leadIn
+          if (ns + n.d < t0 || ns > t1 || n.d < LABEL_MIN_SEC) continue
+          label(ctx, fullName(n.midi), x(Math.max(ns, t0)) + 4, y(n.midi) - 8)
+        }
       }
 
-      // The singer's line, drawn last so it sits on top.
-      const hist = historyRef.current
+      // ---- the singer's line, on top ----
       if (hist.length > 1) {
         ctx.strokeStyle = USER_COLOR
-        ctx.lineWidth = 2.5
-        ctx.lineJoin = 'round'
-        ctx.beginPath()
-        hist.forEach((pt, i) => {
-          const px = x(pt.t)
-          const py = y(pt.midi)
-          if (i === 0) ctx.moveTo(px, py)
-          else ctx.lineTo(px, py)
-        })
-        ctx.stroke()
+        ctx.lineWidth = 5
+        strokeSmooth(ctx, hist.map((pt) => ({ x: x(pt.t), y: y(pt.midi) })))
+        for (const n of heldNotes(hist)) {
+          label(ctx, fullName(n.midi), x(n.start) + 4, y(n.midi) - 8)
+        }
         const last = hist[hist.length - 1]
         ctx.fillStyle = USER_COLOR
         ctx.beginPath()
-        ctx.arc(x(last.t), y(last.midi), 4, 0, Math.PI * 2)
+        ctx.arc(x(last.t), y(last.midi), 5, 0, Math.PI * 2)
         ctx.fill()
       }
-
-      // Playhead
-      ctx.strokeStyle = 'rgba(255,255,255,0.45)'
-      ctx.lineWidth = 1.5
-      ctx.beginPath()
-      ctx.moveTo(x(s.playhead), 4)
-      ctx.lineTo(x(s.playhead), h - 4)
-      ctx.stroke()
 
       // Only keep animating while a take is running. Idling on rAF pins a core
       // for nothing, and on the robot that competes with face detection.
@@ -193,14 +235,12 @@ export default function HarmonyChart({
     }
 
     drawRef.current = draw
-    draw() // paint once so the empty chart (gridlines, legend) is visible
+    draw() // paint once so the empty grid is visible
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current)
     }
   }, [])
 
-  // Kick the loop back off whenever a take starts, and repaint once on the
-  // trailing edge so the final frame isn't left half-drawn.
   useEffect(() => {
     if (running && !rafRef.current && drawRef.current) {
       rafRef.current = requestAnimationFrame(drawRef.current)
@@ -209,28 +249,26 @@ export default function HarmonyChart({
     }
   }, [running, parts, contours])
 
+  const alzonaColor = parts?.length ? PART_COLORS[parts[0]] : PART_COLORS.alto
   return (
     <div>
-      <canvas ref={canvasRef} className="h-40 w-full rounded-xl bg-black/40" />
-      <div className="mt-2 flex flex-wrap items-center gap-3 text-[10px]">
+      <canvas ref={canvasRef} className="h-56 w-full rounded-xl bg-black" />
+      <div className="mt-2 flex flex-wrap items-center gap-4 text-[11px]">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-4 rounded" style={{ background: USER_COLOR }} />
+          <span className="inline-block h-1.5 w-5 rounded-full" style={{ background: USER_COLOR }} />
           <span className="font-semibold text-white/80">You</span>
         </span>
-        {['soprano', 'alto', 'tenor', 'bass'].map((p) => (
-          <span
-            key={p}
-            className={`flex items-center gap-1.5 ${
-              parts.includes(p) ? 'opacity-100' : 'opacity-25'
-            }`}
-          >
+        {parts?.length ? (
+          <span className="flex items-center gap-1.5">
             <span
-              className="inline-block h-2 w-4 rounded"
-              style={{ background: PART_COLORS[p] }}
+              className="inline-block h-1.5 w-5 rounded-full"
+              style={{ background: alzonaColor }}
             />
-            <span className="capitalize text-white/70">{p}</span>
+            <span className="text-white/70">ALZONA</span>
           </span>
-        ))}
+        ) : (
+          <span className="text-white/30">ALZONA joins once she hears you</span>
+        )}
       </div>
     </div>
   )

@@ -14,6 +14,11 @@ const MEDIA = (baseUrl, file) => `${baseUrl}/media/harmony/${file}`
 
 export const PARTS = ['soprano', 'alto', 'tenor', 'bass']
 
+// The lines a SINGER might realistically be on, and so the only ones worth
+// matching their voice against. Tenor and bass are available to play, but
+// nobody sings the melody in them.
+export const SINGER_PARTS = ['soprano', 'alto']
+
 /** Load the manifest + contours + the audio for the requested parts. */
 export async function loadHarmony(baseUrl, ctx, parts, cache = {}) {
   const manifest =

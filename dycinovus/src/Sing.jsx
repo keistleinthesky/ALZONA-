@@ -1,315 +1,327 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { detectPitch, hzFromMidi, midiFromHz, noteLabel } from './pitch'
-import HarmonyChart, { PART_COLORS } from './HarmonyChart'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { NoiseFloor, detectPitch, midiFromHz, noteLabel } from './pitch'
+import HarmonyChart from './HarmonyChart'
+import { PART_COLORS } from './partColors'
+import { HarmonyPlayer, PARTS, SINGER_PARTS, loadHarmony } from './harmonyPlayer'
 import {
-  HarmonyPlayer,
-  PARTS,
-  countIn,
-  loadHarmony,
-  soundReference,
-} from './harmonyPlayer'
+  MIN_DISTINCT_TO_MATCH,
+  MIN_NOTES_TO_MATCH,
+  counterpart,
+  describePosition,
+  framesToNotes,
+  identifyPart,
+} from './scoreMatch'
+import { lyricWindow } from './lyricsMatch'
 
 // =============================================================================
-// LUPANG HINIRANG — sing-back and recorded SATB harmony
+// LUPANG HINIRANG — harmony that answers a live singer
 // =============================================================================
-// Two different jobs, two different engines:
+// ALZONA listens continuously. Sing any part of the anthem and she works out
+// the song, the words, where you are and which line you are on, then comes in
+// with the OTHER line from the recordings — real singing, with the lyrics.
 //
-//   Sing back  - synthesised. It has to reproduce whatever you just sang, in
-//                whatever key you sang it, so there is nothing to pre-record.
-//   Harmonise  - real recorded voices. A fixed piece needs the actual written
-//                parts; a synth guessing intervals produces parallel motion
-//                that is musically wrong no matter how accurate the pitch
-//                tracking is.
+// Two ways in, one engine:
+//   Sing back  - nothing to press or say. She picks the part herself: sing the
+//                melody and she takes alto, sing alto and she takes the melody.
+//   Harmonise  - you choose the parts, by button or by spoken command.
 //
-// Pitch tracking runs in the browser either way, so the mic feeds the display
-// and the sync logic with no upload round-trip.
+// Pitch tracking runs here in the browser so the display and the sync logic are
+// immediate. The WORDS go to the backend, which also decides whether a clip was
+// singing or a question — that is what lets one always-open microphone serve
+// both the harmony and the conversation. The browser's SpeechRecognition can't
+// share a microphone, and using it made both features fail at once.
 
-// Stop singing for this long and the recording WAITS for you. Set above a
-// normal breath (~0.5s) so ordinary phrasing doesn't pause it, but low enough
-// that pausing feels immediate when you actually stop.
+// Stop singing for this long and the recording WAITS for you. Above a normal
+// breath (~0.5s) so ordinary phrasing does not pause it.
 const SILENCE_PAUSE = 1.2
-// Only after this much continuous silence do we call the take finished and
-// release the microphone.
+// Only after this much continuous silence is the take finished.
 const SILENCE_END = 10.0
 // A note held this long counts as a sustain worth waiting for at a phrase end.
 const SUSTAIN_HOLD = 0.5
-// If the count-in finishes and no singing arrives at all, stop rather than
-// playing all 72 seconds to an empty room.
-const NO_SHOW_STOP = 12.0
 
-// -----------------------------------------------------------------------------
-// Synth voice for sing-back: a few harmonics plus gentle vibrato. Not a human
-// voice and not pretending to be — a clean pitched tone that tracks the target
-// note exactly.
-// -----------------------------------------------------------------------------
-function createVoice(ctx, destination) {
-  const now = ctx.currentTime
-  const real = new Float32Array([0, 1, 0.45, 0.28, 0.16, 0.09, 0.05])
-  const wave = ctx.createPeriodicWave(real, new Float32Array(real.length))
+// Seconds between pitch analyses while waiting for someone to sing. Detection
+// is O(n^2) per call and this loop runs continuously, so every frame would
+// compete with the face detector for CPU. Sung notes last well over 50ms.
+const IDLE_ANALYSIS_INTERVAL = 0.05
 
-  const osc = ctx.createOscillator()
-  osc.setPeriodicWave(wave)
+// Give up auto-starting after this many consecutive failures, so a denied
+// microphone becomes one message instead of an endless retry.
+const MAX_ARM_FAILURES = 3
 
-  const vibrato = ctx.createOscillator()
-  vibrato.frequency.value = 5.2
-  const vibratoGain = ctx.createGain()
-  vibratoGain.gain.value = 0
-  vibrato.connect(vibratoGain).connect(osc.frequency)
+// How long to trust a lyric hint that is not producing a match. Beyond this the
+// hint was wrong, and keeping it would block matching for good.
+const LYRIC_HINT_TIMEOUT = 5000
 
-  const filter = ctx.createBiquadFilter()
-  filter.type = 'lowpass'
-  filter.frequency.value = 2600
+// How much recent pitch history to keep. Long enough for a phrase, short enough
+// that a stray sound ages out instead of poisoning every later match.
+const CONTOUR_MEMORY = 12
 
-  const gain = ctx.createGain()
-  gain.gain.value = 0
+// Clip length sent for word recognition. Enough for a line of the anthem
+// without the answer arriving too late to be useful.
+const CLIP_MS = 4000
 
-  osc.connect(filter).connect(gain).connect(destination)
-  osc.start(now)
-  vibrato.start(now)
-
-  return {
-    osc,
-    gain,
-    vibratoGain,
-    stop: () => {
-      try { osc.stop() } catch { /* already stopped */ }
-      try { vibrato.stop() } catch { /* already stopped */ }
-    },
-  }
-}
-
-export default function Sing({ baseUrl, armed, onClear }) {
+export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [listening, setListening] = useState(false)
-  const [mode, setMode] = useState('harmonize')
-  const [parts, setParts] = useState(['alto'])
+  const [mode, setMode] = useState('imitate')      // 'imitate' = sing back
+  // Empty means decide automatically. A part can still be forced, by button or
+  // by spoken command — but only in Harmonise.
+  const [parts, setParts] = useState([])
+  const [autoPart, setAutoPart] = useState(null)
+  const [audioBlocked, setAudioBlocked] = useState(false)
   const [pitch, setPitch] = useState({ hz: 0, clarity: 0 })
-  const [status, setStatus] = useState('Idle')
+  const [status, setStatus] = useState('Listening…')
   const [playhead, setPlayhead] = useState(0)
   const [holding, setHolding] = useState(false)
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
+  const [matched, setMatched] = useState(null)
+  const [heardLyric, setHeardLyric] = useState(null)
+  const [heardSong, setHeardSong] = useState(null)
+  const [diag, setDiag] = useState(null)
 
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
   const bufRef = useRef(null)
   const analyserRef = useRef(null)
-  const voiceRef = useRef(null)       // synth, sing-back only
-  const playerRef = useRef(null)      // recorded harmony
-  const cacheRef = useRef({})         // decoded buffers survive restarts
-  const contourRef = useRef([])       // [{t, hz}] captured for sing-back
+  const playerRef = useRef(null)
+  const cacheRef = useRef({})
+  const contourRef = useRef([])
   const startedAtRef = useRef(0)
   const lastVoicedRef = useRef(0)
-  // The auto-stop must not arm until the singer has actually sung something.
-  // The reference note + count-in take ~4.7s, which is longer than the silence
-  // threshold — without this the harmony stops itself the instant it starts.
   const hasSungRef = useRef(false)
-  const playbackStartedRef = useRef(0)
-  // The rAF loop below is created once per take, so it would capture these as
-  // stale values if read from state. Refs keep it reading the live ones.
+  const floorRef = useRef(new NoiseFloor())
+  const matchRef = useRef(null)
+  const joiningRef = useRef(false)
   const holdingRef = useRef(false)
   const boundsRef = useRef([])
   const sustainRef = useRef({ midi: null, since: 0 })
+  const lyricsRef = useRef(null)
+  const lyricWindowRef = useRef(null)
+  const lyricHintAtRef = useRef(0)
+  const clipRecorderRef = useRef(null)
+  const clipTimerRef = useRef(null)
+  const startingRef = useRef(false)
+  const listeningRef = useRef(false)
+  const armFailuresRef = useRef(0)
+  const autoStartedRef = useRef(false)
   const modeRef = useRef(mode)
   const partsRef = useRef(parts)
+  const activePartsRef = useRef([])
+
+  // The line ALZONA is on: a forced choice in Harmonise, else the counterpart
+  // of whatever the singer was identified as. Memoised so the effect mirroring
+  // it into a ref does not fire on every frame.
+  const activeParts = useMemo(
+    () => (mode === 'harmonize' && parts.length
+      ? parts
+      : autoPart ? [counterpart(autoPart, SINGER_PARTS)] : []),
+    [mode, parts, autoPart],
+  )
 
   useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { partsRef.current = parts }, [parts])
+  useEffect(() => { listeningRef.current = listening }, [listening])
+  useEffect(() => { activePartsRef.current = activeParts }, [activeParts])
 
-  // A spoken command ("harmonize with me in tenor and bass") arms the panel.
+  // A spoken command selects parts and switches to Harmonise.
   useEffect(() => {
     if (!armed) return
-    setMode(armed.mode === 'harmonize' ? 'harmonize' : 'imitate')
-    if (armed.parts?.length) setParts(armed.parts)
-    else if (armed.part) setParts([armed.part])
+    if (armed.parts?.length) {
+      setParts(armed.parts)
+      setMode('harmonize')
+    }
     onClear?.()
   }, [armed, onClear])
 
-  // Pull the manifest up front so the UI can show the tempo before playing.
+  // Reference data, fetched once.
   useEffect(() => {
     let alive = true
-    fetch(`${baseUrl}/media/harmony/manifest.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((m) => { if (alive && m) { setManifest(m); cacheRef.current.manifest = m } })
-      .catch(() => {})
-    fetch(`${baseUrl}/media/harmony/contours.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((c) => { if (alive && c) { setContours(c); cacheRef.current.contours = c } })
-      .catch(() => {})
+    const get = (name) =>
+      fetch(`${baseUrl}/media/harmony/${name}`).then((r) => (r.ok ? r.json() : null))
+    get('manifest.json').then((m) => {
+      if (alive && m) { setManifest(m); cacheRef.current.manifest = m; boundsRef.current = m.phrase_boundaries ?? [] }
+    }).catch(() => {})
+    get('contours.json').then((c) => {
+      if (alive && c) { setContours(c); cacheRef.current.contours = c }
+    }).catch(() => {})
+    get('lyrics.json').then((l) => { if (alive && l?.lines) lyricsRef.current = l.lines }).catch(() => {})
     return () => { alive = false }
   }, [baseUrl])
 
-  const setHold = (v) => {
-    holdingRef.current = v
-    setHolding(v)
-  }
+  const setHold = (v) => { holdingRef.current = v; setHolding(v) }
 
   const togglePart = (p) =>
     setParts((cur) => {
       const next = cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p]
-      // Keep canonical SATB order, and never leave the selection empty.
-      const ordered = PARTS.filter((x) => next.includes(x))
-      return ordered.length ? ordered : cur
+      return PARTS.filter((x) => next.includes(x))   // empty = automatic
     })
 
   const teardown = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = null
+    if (clipTimerRef.current) clearTimeout(clipTimerRef.current)
+    clipTimerRef.current = null
+    const rec = clipRecorderRef.current
+    clipRecorderRef.current = null
+    if (rec && rec.state !== 'inactive') {
+      rec.onstop = null
+      try { rec.stop() } catch { /* already stopped */ }
+    }
     if (playerRef.current) {
       playerRef.current.fadeOutAndStop(0.4)
       playerRef.current = null
-    }
-    if (voiceRef.current) {
-      const v = voiceRef.current
-      const ctx = ctxRef.current
-      if (ctx) v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05)
-      voiceRef.current = null
-      setTimeout(() => v.stop(), 300)
     }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
     setListening(false)
-    holdingRef.current = false
-    setHolding(false)
+    setHold(false)
     setPitch({ hz: 0, clarity: 0 })
   }, [])
 
-  // ---- sing-back (synth) ----------------------------------------------------
-  const singBack = useCallback(async () => {
-    const contour = contourRef.current
-    if (contour.length < 4) {
-      setStatus('I did not hear enough singing to copy.')
-      return
-    }
-    const ctx = ctxRef.current
-    await ctx.resume()
-
-    const notes = []
-    for (const p of contour) {
-      const midi = Math.round(midiFromHz(p.hz))
-      const last = notes[notes.length - 1]
-      if (last && last.midi === midi) last.end = p.t
-      else notes.push({ midi, start: p.t, end: p.t })
-    }
-    const sung = notes.filter((n) => n.end - n.start > 0.09)
-    if (!sung.length) {
-      setStatus('I did not hear a clear melody to copy.')
-      return
-    }
-
-    setStatus(`Singing back ${sung.length} notes…`)
-    const voice = createVoice(ctx, ctx.destination)
-    const t0 = ctx.currentTime + 0.08
-    const base = sung[0].start
-    voice.vibratoGain.gain.setValueAtTime(3.2, t0)
-    sung.forEach((n, i) => {
-      const at = t0 + (n.start - base)
-      const dur = Math.max(0.16, n.end - n.start)
-      voice.osc.frequency.setValueAtTime(hzFromMidi(n.midi), at)
-      voice.gain.gain.setValueAtTime(i === 0 ? 0.0001 : 0.05, at)
-      voice.gain.gain.exponentialRampToValueAtTime(0.32, at + 0.05)
-      voice.gain.gain.setValueAtTime(0.32, at + dur - 0.05)
-      voice.gain.gain.exponentialRampToValueAtTime(0.05, at + dur)
-    })
-    const total = sung[sung.length - 1].end - base
-    voice.gain.gain.setTargetAtTime(0, t0 + total, 0.06)
-    setTimeout(() => {
-      voice.stop()
-      setStatus('Done — sing again whenever you like.')
-    }, (total + 0.9) * 1000)
+  // ---- come in at the point the singer has reached -------------------------
+  const joinAt = useCallback((player, match, elapsed, now, chosen, singerPart) => {
+    if (!playerRef.current) return
+    player.offset = match.time + elapsed
+    player.start(chosen)
+    lastVoicedRef.current = now
+    setAutoPart(singerPart)
+    setStatus(`Harmonising — ${describePosition(match, boundsRef.current)}`)
   }, [])
 
-  // ---- shared mic setup -----------------------------------------------------
-  const openMic = useCallback(async () => {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false, // would fight the harmony coming out the speakers
-        noiseSuppression: false, // would chew up sustained sung vowels
-        autoGainControl: false,
-      },
-    })
-    streamRef.current = stream
-    const ctx =
-      ctxRef.current ?? new (window.AudioContext || window.webkitAudioContext)()
-    ctxRef.current = ctx
-    await ctx.resume()
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 2048
-    ctx.createMediaStreamSource(stream).connect(analyser)
-    analyserRef.current = analyser
-    bufRef.current = new Float32Array(analyser.fftSize)
-    return ctx
-  }, [])
+  // ---- clips: words, and questions -----------------------------------------
+  const startClips = useCallback(() => {
+    if (!streamRef.current || clipRecorderRef.current) return
+    const send = async (blob) => {
+      if (blob.size < 3000) return
+      try {
+        const fd = new FormData()
+        fd.append('file', blob, 'clip.webm')
+        const data = await fetch(`${baseUrl}/listen`, { method: 'POST', body: fd })
+          .then((r) => r.json())
+
+        if (data.kind === 'speech' && data.reply) {
+          onHeardSpeech?.(data)          // a question — answer it, leave singing alone
+          return
+        }
+        if (data.kind !== 'singing') return
+        if (data.song) setHeardSong(data.song)
+        if (data.index == null || lyricWindowRef.current || matchRef.current) return
+        const line = lyricsRef.current?.[data.index]
+        if (!line) return
+        lyricWindowRef.current = lyricWindow({ line })
+        lyricHintAtRef.current = performance.now()
+        setHeardLyric(line.text)
+      } catch { /* no hint; the melody matcher is unaffected */ }
+    }
+    try {
+      const rec = new MediaRecorder(streamRef.current)
+      const chunks = []
+      rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
+      rec.onstop = () => {
+        if (chunks.length) send(new Blob(chunks, { type: chunks[0].type }))
+        chunks.length = 0
+        if (clipRecorderRef.current === rec) {
+          try { rec.start() } catch { return }
+          clipTimerRef.current = setTimeout(() => {
+            try { rec.stop() } catch { /* already stopped */ }
+          }, CLIP_MS)
+        }
+      }
+      rec.start()
+      clipRecorderRef.current = rec
+      clipTimerRef.current = setTimeout(() => {
+        try { rec.stop() } catch { /* already stopped */ }
+      }, CLIP_MS)
+    } catch {
+      clipRecorderRef.current = null   // no words; the melody still works
+    }
+  }, [baseUrl, onHeardSpeech])
 
   const start = useCallback(async () => {
+    if (startingRef.current || listeningRef.current) return
+    startingRef.current = true
     try {
-      setStatus('Opening the microphone…')
-      const ctx = await openMic()
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,  // would fight the harmony from the speakers
+          noiseSuppression: false,  // would chew up sustained sung vowels
+          // Left ON deliberately: without it this hardware delivered an RMS of
+          // 0.002 for real singing, ten times too quiet to detect at all.
+          autoGainControl: true,
+        },
+      })
+      streamRef.current = stream
+
+      const ctx = ctxRef.current ?? new (window.AudioContext || window.webkitAudioContext)()
+      ctxRef.current = ctx
+      await ctx.resume()
+      // Autoplay policy: a context created without a gesture stays suspended.
+      // Listening works regardless, but the harmony would be silent.
+      setAudioBlocked(ctx.state !== 'running')
+
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 2048
+      ctx.createMediaStreamSource(stream).connect(analyser)
+      analyserRef.current = analyser
+      bufRef.current = new Float32Array(analyser.fftSize)
+
       contourRef.current = []
       startedAtRef.current = ctx.currentTime
       lastVoicedRef.current = ctx.currentTime
       hasSungRef.current = false
-      playbackStartedRef.current = 0
-      holdingRef.current = false
+      matchRef.current = null
+      joiningRef.current = false
+      lyricWindowRef.current = null
+      floorRef.current = new NoiseFloor()
       sustainRef.current = { midi: null, since: 0 }
+      setMatched(null)
+      setAutoPart(null)
+      setHeardLyric(null)
+      setHeardSong(null)
       setPlayhead(0)
 
-      if (modeRef.current === 'harmonize') {
-        setStatus('Loading the harmony parts…')
-        const chosen = partsRef.current
-        const loaded = await loadHarmony(baseUrl, ctx, chosen, cacheRef.current)
-        cacheRef.current = loaded
-        setManifest(loaded.manifest)
-        setContours(loaded.contours)
-        boundsRef.current = loaded.manifest.phrase_boundaries ?? []
+      const loaded = await loadHarmony(
+        baseUrl, ctx, [...new Set([...SINGER_PARTS, ...partsRef.current])], cacheRef.current,
+      )
+      cacheRef.current = loaded
+      setManifest(loaded.manifest)
+      setContours(loaded.contours)
+      boundsRef.current = loaded.manifest.phrase_boundaries ?? []
 
-        const missing = chosen.filter((p) => !loaded.buffers[p])
-        if (missing.length === chosen.length) {
-          setStatus(`No recording found for ${chosen.join(', ')}.`)
-          teardown()
-          return
-        }
+      playerRef.current = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
+        onEnded: () => { setStatus('Finished.'); teardown() },
+      })
 
-        // Sound the recording's own starting pitch. The takes sit ~21 cents
-        // below concert pitch, so tuning to a piano would beat against them —
-        // tuning to this note will not.
-        const refHz = loaded.manifest.parts.soprano?.start_hz ?? 385.4
-        setStatus('Listen for your starting note…')
-        const refLen = soundReference(ctx, refHz, 1.6)
-
-        const bpm = loaded.manifest.tempo_bpm ?? 84
-        const { endsAt } = countIn(ctx, bpm, 4, ctx.currentTime + refLen + 0.25)
-
-        const player = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
-          onEnded: () => { setStatus('Harmony finished.'); teardown() },
-        })
-        playerRef.current = player
-
-        // No fixed length: the recording runs on and the take ends when the
-        // singer stops (SILENCE_STOP below), so a short demo and a full
-        // performance need no different setup.
-        const waitMs = Math.max(0, (endsAt - ctx.currentTime) * 1000)
-        setTimeout(() => {
-          if (!playerRef.current) return
-          playerRef.current.start(chosen)
-          // The clock for "have they stopped singing?" starts HERE, not when
-          // the mic opened — everything before this was count-in.
-          lastVoicedRef.current = ctx.currentTime
-          playbackStartedRef.current = ctx.currentTime
-          setStatus(`Harmonising in ${chosen.join(' + ')} — sing!`)
-        }, waitMs)
-        setStatus(`Count-in… (${bpm} BPM)`)
-      } else {
-        setStatus('Listening — sing a line of Lupang Hinirang.')
-      }
+      startClips()
       setListening(true)
+      setStatus('Listening — just start singing.')
+      armFailuresRef.current = 0
+
+      let lastAnalysis = 0
+      let lastDiag = 0
+      let lastSent = 0
 
       const tick = () => {
+        const engaged = !!matchRef.current
+        const nowMs = performance.now()
+        if (!engaged && nowMs - lastAnalysis < IDLE_ANALYSIS_INTERVAL * 1000) {
+          rafRef.current = requestAnimationFrame(tick)
+          return
+        }
+        lastAnalysis = nowMs
+
         const buffer = bufRef.current
         analyserRef.current.getFloatTimeDomainData(buffer)
-        const { hz, clarity } = detectPitch(buffer, ctx.sampleRate)
+        // Measure the level, let the floor adapt, then detect against it rather
+        // than a hardcoded threshold.
+        let lvl = 0
+        for (let i = 0; i < buffer.length; i += 1) lvl += buffer[i] * buffer[i]
+        lvl = Math.sqrt(lvl / buffer.length)
+        const gate = floorRef.current.update(lvl)
+        const { hz, clarity } = detectPitch(buffer, ctx.sampleRate, gate)
         const now = ctx.currentTime
         const player = playerRef.current
 
@@ -317,64 +329,99 @@ export default function Sing({ baseUrl, armed, onClear }) {
           setPitch({ hz, clarity })
           lastVoicedRef.current = now
           hasSungRef.current = true
-          contourRef.current.push({ t: now - startedAtRef.current, hz })
-
-          // Track how long the current note has been held — used to decide
-          // whether the singer is sustaining through a phrase end.
-          const midi = Math.round(midiFromHz(hz))
-          if (sustainRef.current.midi !== midi) {
-            sustainRef.current = { midi, since: now }
+          const at = now - startedAtRef.current
+          contourRef.current.push({ t: at, hz })
+          const cutoff = at - CONTOUR_MEMORY
+          while (contourRef.current.length && contourRef.current[0].t < cutoff) {
+            contourRef.current.shift()
           }
+          const midi = Math.round(midiFromHz(hz))
+          if (sustainRef.current.midi !== midi) sustainRef.current = { midi, since: now }
         } else {
           setPitch((p) => ({ ...p, clarity: 0 }))
           sustainRef.current = { midi: null, since: 0 }
         }
 
-        if (player && modeRef.current === 'harmonize') {
+        // ---- find where they are, and come in --------------------------------
+        if (player && !matchRef.current && !joiningRef.current) {
+          const sung = framesToNotes(contourRef.current)
+          if (sung.length >= MIN_NOTES_TO_MATCH) {
+            if (lyricWindowRef.current
+                && nowMs - lyricHintAtRef.current > LYRIC_HINT_TIMEOUT) {
+              lyricWindowRef.current = null
+              setHeardLyric(null)
+            }
+            const opts = lyricWindowRef.current ? { window: lyricWindowRef.current } : {}
+            const cs = cacheRef.current.contours
+            // Match on a RECENT window, not the whole take: matching everything
+            // meant one stray sound poisoned the sequence permanently.
+            let id = null
+            if (cs) {
+              for (const take of [10, 14, 20, 8]) {
+                const recent = sung.slice(-take)
+                if (recent.length < MIN_DISTINCT_TO_MATCH) continue
+                id = identifyPart(recent, cs, SINGER_PARTS, opts)
+                if (id) break
+              }
+            }
+            if (id) {
+              joiningRef.current = true
+              matchRef.current = id.match
+              setMatched(id.match)
+              const chosen = modeRef.current === 'harmonize' && partsRef.current.length
+                ? partsRef.current
+                : [counterpart(id.part, SINGER_PARTS)]
+              const elapsed = (now - startedAtRef.current) - sung[0].start
+              joinAt(player, id.match, elapsed, now, chosen, id.part)
+            }
+          }
+        }
+
+        // ---- follow: wait when they pause, resume when they carry on ---------
+        if (player && matchRef.current) {
           setPlayhead(player.playhead)
           const quiet = now - lastVoicedRef.current
-
-          // The recording follows the singer: it waits whenever they are not
-          // singing, and picks up again the moment they are. Only a long
-          // silence actually finishes the take.
-          const waitedTooLong =
-            !hasSungRef.current &&
-            playbackStartedRef.current > 0 &&
-            now - playbackStartedRef.current > NO_SHOW_STOP
-
           if (player.playing) {
-            const bounds = boundsRef.current
             const head = player.playhead
-            const atBoundary = bounds.some((b) => head >= b && head < b + 0.35)
-            const sustaining =
-              sustainRef.current.midi !== null &&
-              now - sustainRef.current.since > SUSTAIN_HOLD
-
+            const atBoundary = boundsRef.current.some((b) => head >= b && head < b + 0.35)
+            const sustaining = sustainRef.current.midi !== null
+              && now - sustainRef.current.since > SUSTAIN_HOLD
             if (hasSungRef.current && quiet > SILENCE_PAUSE) {
-              // Stopped mid-song — wait here rather than carrying on alone.
-              player.hold()
-              setHold(true)
-              setStatus('Paused — sing again to carry on.')
+              player.hold(); setHold(true); setStatus('Paused — sing again to carry on.')
             } else if (atBoundary && sustaining) {
-              // Still singing, but holding a note past the end of the phrase.
-              player.hold()
-              setHold(true)
-              setStatus('Holding for you…')
-            } else if (waitedTooLong) {
-              setStatus("I didn't hear any singing — stopped.")
-              player.fadeOutAndStop(0.6)
-              setTimeout(() => teardown(), 700)
+              player.hold(); setHold(true); setStatus('Holding for you…')
             }
           } else if (holdingRef.current) {
             if (hz > 0) {
-              // Any note brings the harmony straight back in.
-              player.resume()
-              setHold(false)
-              setStatus('Carrying on.')
+              player.resume(); setHold(false); setStatus('Carrying on.')
             } else if (quiet > SILENCE_END) {
               setStatus('Finished — you stopped singing.')
               setTimeout(() => teardown(), 200)
             }
+          }
+        }
+
+        if (nowMs - lastDiag > 200) {
+          lastDiag = nowMs
+          const notes = framesToNotes(contourRef.current)
+          const distinct = notes.filter((n, i) => i === 0 || n.midi !== notes[i - 1].midi)
+          setDiag({
+            level: lvl.toFixed(4), gate: gate.toFixed(4),
+            hz: hz > 0 ? hz.toFixed(0) : '—', clarity: clarity.toFixed(2),
+            distinct: distinct.length, need: MIN_DISTINCT_TO_MATCH,
+            lyric: lyricWindowRef.current ? 'yes' : 'no',
+            matched: matchRef.current ? `${matchRef.current.time.toFixed(1)}s` : 'no',
+          })
+          if (nowMs - lastSent > 1000) {
+            lastSent = nowMs
+            const fd = new FormData()
+            fd.append('line',
+              `lvl=${lvl.toFixed(4)} gate=${gate.toFixed(4)} ` +
+              `hz=${hz > 0 ? hz.toFixed(0) : '-'} clar=${clarity.toFixed(2)} ` +
+              `distinct=${distinct.length}/${MIN_DISTINCT_TO_MATCH} ` +
+              `lyric=${lyricWindowRef.current ? 'Y' : 'n'} ` +
+              `matched=${matchRef.current ? matchRef.current.time.toFixed(1) + 's' : 'no'}`)
+            fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
           }
         }
 
@@ -383,27 +430,47 @@ export default function Sing({ baseUrl, armed, onClear }) {
       rafRef.current = requestAnimationFrame(tick)
     } catch (err) {
       console.error('Sing: start failed', err)
-      setStatus(`Could not start: ${err.message}`)
+      armFailuresRef.current += 1
+      setStatus(err?.name === 'NotAllowedError'
+        ? 'Microphone blocked — allow it in the browser, then reload.'
+        : `Could not start: ${err.message}`)
       teardown()
+    } finally {
+      startingRef.current = false
     }
-  }, [baseUrl, openMic, teardown])
+  }, [baseUrl, joinAt, startClips, teardown])
 
-  const stop = useCallback(() => {
-    const wasImitate = modeRef.current === 'imitate'
-    teardown()
-    if (wasImitate) {
-      setStatus('Thinking…')
-      setTimeout(() => singBack(), 150)
-    } else {
-      setStatus('Stopped.')
+  // ALWAYS listening. Detecting singing on its own is the whole feature, so
+  // there is nothing to press and nothing to say first.
+  useEffect(() => {
+    if (listening || armFailuresRef.current >= MAX_ARM_FAILURES) return undefined
+    const delay = autoStartedRef.current ? 1500 : 600
+    autoStartedRef.current = true
+    const id = setTimeout(() => { start() }, delay)
+    return () => clearTimeout(id)
+  }, [listening, start])
+
+  // Any interaction is enough to let audio play; take the first one we get.
+  useEffect(() => {
+    if (!audioBlocked) return undefined
+    const unlock = async () => {
+      try {
+        await ctxRef.current?.resume()
+        if (ctxRef.current?.state === 'running') setAudioBlocked(false)
+      } catch { /* wait for the next interaction */ }
     }
-  }, [singBack, teardown])
+    window.addEventListener('pointerdown', unlock)
+    window.addEventListener('keydown', unlock)
+    return () => {
+      window.removeEventListener('pointerdown', unlock)
+      window.removeEventListener('keydown', unlock)
+    }
+  }, [audioBlocked])
 
   useEffect(() => () => teardown(), [teardown])
 
   const info = noteLabel(pitch.hz)
   const inTune = Math.abs(info.cents) <= 15 && pitch.hz > 0
-  const needle = Math.max(-50, Math.min(50, info.cents))
   const userMidi = pitch.hz > 0 ? midiFromHz(pitch.hz) : null
 
   return (
@@ -414,66 +481,58 @@ export default function Sing({ baseUrl, armed, onClear }) {
           <h2 className="mt-1 text-lg font-bold text-white">Sing &amp; Harmonise</h2>
         </div>
         <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
-          {manifest ? `${manifest.tempo_bpm} BPM` : 'pitch'}
+          {listening ? 'listening' : 'idle'}
         </div>
       </div>
 
-      {/* Mode */}
       <div className="mt-3 flex gap-2">
-        {[
-          ['harmonize', 'Harmonise'],
-          ['imitate', 'Sing back'],
-        ].map(([m, label]) => (
+        {[['imitate', 'Sing back'], ['harmonize', 'Harmonise']].map(([m, lbl]) => (
           <button
             key={m}
             type="button"
-            disabled={listening}
             onClick={() => setMode(m)}
             className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-              mode === m
-                ? 'bg-fuchsia-500/80 text-white'
-                : 'bg-white/10 text-white/70 hover:bg-white/20'
-            } disabled:opacity-40`}
+              mode === m ? 'bg-fuchsia-500/80 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
+            }`}
           >
-            {label}
+            {lbl}
           </button>
         ))}
       </div>
 
+      {/* Part selection is for Harmonise only. Sing back deliberately shows
+          nothing about which line is being sung — it decides for itself. */}
       {mode === 'harmonize' && (
-        <>
-          {/* Parts — any combination */}
-          <div className="mt-3">
+        <div className="mt-3">
+          <div className="flex items-baseline justify-between">
             <p className="text-[10px] uppercase tracking-widest text-white/40">Voices</p>
-            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-              {PARTS.map((p) => {
-                const on = parts.includes(p)
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    disabled={listening}
-                    onClick={() => togglePart(p)}
-                    style={on ? { background: PART_COLORS[p], color: '#171457' } : undefined}
-                    className={`rounded-lg px-1 py-2 text-xs font-bold capitalize transition ${
-                      on ? '' : 'bg-white/10 text-white/60 hover:bg-white/20'
-                    } disabled:opacity-40`}
-                  >
-                    {p.slice(0, 4)}
-                  </button>
-                )
-              })}
-            </div>
+            <p className="text-[10px] text-white/30">none = automatic</p>
           </div>
-
-        </>
+          <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+            {PARTS.map((p) => {
+              const on = parts.includes(p)
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => togglePart(p)}
+                  style={on ? { background: PART_COLORS[p], color: '#171457' } : undefined}
+                  className={`rounded-lg px-1 py-2 text-xs font-bold capitalize transition ${
+                    on ? '' : 'bg-white/10 text-white/60 hover:bg-white/20'
+                  }`}
+                >
+                  {p.slice(0, 4)}
+                </button>
+              )
+            })}
+          </div>
+        </div>
       )}
 
-      {/* Live chart */}
       <div className="mt-3">
         <HarmonyChart
           userMidi={userMidi}
-          parts={mode === 'harmonize' ? parts : []}
+          parts={activeParts}
           contours={contours}
           playhead={playhead}
           leadIn={manifest?.lead_in ?? 0}
@@ -481,65 +540,55 @@ export default function Sing({ baseUrl, armed, onClear }) {
         />
       </div>
 
-      {/* Note readout */}
       <div className="mt-3 rounded-2xl border border-white/10 bg-black/30 p-3 text-center">
         <div className="flex items-baseline justify-center gap-1">
-          <span
-            className={`text-4xl font-extrabold tabular-nums ${
-              pitch.hz > 0 ? (inTune ? 'text-emerald-300' : 'text-[#ffe8b6]') : 'text-white/25'
-            }`}
-          >
+          <span className={`text-4xl font-extrabold tabular-nums ${
+            pitch.hz > 0 ? (inTune ? 'text-emerald-300' : 'text-[#ffe8b6]') : 'text-white/25'
+          }`}>
             {info.name}
           </span>
           <span className="text-xl font-bold text-white/50">{info.octave}</span>
         </div>
         <p className="mt-1 text-xs tabular-nums text-white/60">
           {pitch.hz > 0 ? `${pitch.hz.toFixed(1)} Hz` : 'no pitch'}
-          {pitch.hz > 0 && (
-            <span className={inTune ? 'text-emerald-300' : 'text-amber-300'}>
-              {'  '}
-              {info.cents >= 0 ? '+' : ''}
-              {info.cents}¢
-            </span>
-          )}
         </p>
-        <div className="relative mt-2 h-2.5 w-full overflow-hidden rounded-full bg-white/10">
-          <div className="absolute left-1/2 top-0 h-full w-px -translate-x-1/2 bg-white/40" />
-          {pitch.hz > 0 && (
-            <div
-              className={`absolute top-0 h-full w-2 rounded-full transition-all duration-75 ${
-                inTune ? 'bg-emerald-400' : 'bg-amber-400'
-              }`}
-              style={{ left: `calc(${50 + needle}% - 4px)` }}
-            />
-          )}
-        </div>
       </div>
 
-      <button
-        type="button"
-        onClick={listening ? stop : start}
-        className={`mt-3 w-full rounded-xl px-4 py-3 text-sm font-bold transition ${
-          listening
-            ? 'bg-rose-500 text-white hover:bg-rose-400'
-            : 'bg-emerald-500 text-white hover:bg-emerald-400'
-        }`}
-      >
-        {listening
-          ? mode === 'imitate'
-            ? 'Stop — and sing it back'
-            : 'Stop'
-          : mode === 'imitate'
-            ? 'Start singing'
-            : `Harmonise in ${parts.join(' + ')}`}
-      </button>
+      {listening && diag && (
+        <div className="mt-2 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5">
+          <div className="grid grid-cols-4 gap-1 text-center text-[9px] leading-tight">
+            {[
+              ['level', diag.level, Number(diag.level) > Number(diag.gate)],
+              ['pitch', `${diag.hz} Hz`, diag.hz !== '—'],
+              ['notes', `${diag.distinct}/${diag.need}`, diag.distinct >= diag.need],
+              ['joined', diag.matched, diag.matched !== 'no'],
+            ].map(([k, v, good]) => (
+              <div key={k}>
+                <p className="uppercase tracking-wider text-white/35">{k}</p>
+                <p className={good ? 'font-bold text-emerald-300' : 'text-white/50'}>{v}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-      <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>
-      {mode === 'harmonize' && (
-        <p className="mt-1 text-[10px] text-white/30">
-          Use headphones — otherwise the mic hears the harmony and tracks that instead of you.
+      {(heardSong || heardLyric) && (
+        <p className="mt-2 text-[10px] text-sky-300/80">
+          {heardSong ? `${heardSong} · ` : ''}
+          {heardLyric ? `“${heardLyric}”` : ''}
         </p>
       )}
+
+      {audioBlocked && (
+        <p className="mt-2 text-xs text-amber-300">
+          Click anywhere on the page once so the browser will let ALZONA sing.
+        </p>
+      )}
+      <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>
+      <p className="mt-1 text-[10px] text-white/30">
+        Just start singing — ALZONA finds your place and joins in. Use headphones,
+        or the microphone hears her instead of you.
+      </p>
     </section>
   )
 }

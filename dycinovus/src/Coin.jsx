@@ -9,11 +9,14 @@ import { useState } from 'react'
 // missing field obvious.
 
 const FIELD_ORDER = [
-  { key: 'country', label: 'Nationality / Country', emoji: '🇵🇭' },
+  { key: 'country', label: 'Nationality / Country', emoji: '🇵🇭🇭🇷' },
   { key: 'denomination', label: 'Currency & Denomination', emoji: '💰' },
-  { key: 'year', label: 'Year of Issue', emoji: '📅' },
   { key: 'featured', label: 'Person / Symbol Featured', emoji: '👤' },
   { key: 'significance', label: 'Historical & Cultural Significance', emoji: '🏛️' },
+  // Judgements about the coin rather than descriptions of it, so they sit
+  // apart from the four categories above.
+  { key: 'authenticity', label: 'Real or Fake', emoji: '🔎' },
+  { key: 'other_countries', label: 'Used Elsewhere', emoji: '🌍' },
 ]
 
 export default function Coin({ baseUrl, fields, onResult }) {

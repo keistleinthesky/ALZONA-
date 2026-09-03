@@ -423,6 +423,21 @@ function App() {
             baseUrl={BASE_URL}
             armed={singCommand}
             onClear={() => setSingCommand(null)}
+            // ALZONA hears everything through the singing panel's microphone.
+            // When what she heard was a question rather than singing, the answer
+            // arrives here and is shown and spoken exactly like a typed one.
+            onHeardSpeech={(data) => {
+              applyResult({
+                transcript: data.transcript,
+                reply: data.reply,
+                mode: data.mode,
+                image_url: data.image_url ? `${BASE_URL}${data.image_url}` : null,
+                video_url: data.video_url ? `${BASE_URL}${data.video_url}` : null,
+                coin: data.coin,
+                sing: data.sing,
+              })
+              if (data.tts_url) setAudioSrc(`${BASE_URL}${data.tts_url}?t=${Date.now()}`)
+            }}
           />
           <Coin
             baseUrl={BASE_URL}
