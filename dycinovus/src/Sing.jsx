@@ -38,6 +38,11 @@ const SILENCE_PAUSE = 1.2
 const SILENCE_END = 10.0
 // A note held this long counts as a sustain worth waiting for at a phrase end.
 const SUSTAIN_HOLD = 0.5
+// While paused she is not playing, so nothing counts as her own voice and a
+// single stray frame used to restart her — which then paused again a moment
+// later. Resuming needs this much CONTINUOUS singing, so a cough or the tail of
+// her own last note cannot start the music.
+const RESUME_VOICE = 0.18
 
 // Seconds between pitch analyses while waiting for someone to sing. Detection
 // is O(n^2) per call and this loop runs continuously, so every frame would
@@ -64,6 +69,76 @@ const CLIP_MS = 4000
 // which reads like a glitch on a projector.
 const PART_LABEL = { soprano: 'Sop', alto: 'Alto', tenor: 'Ten', bass: 'Bass' }
 
+// A microphone muted in Windows, or a stale default still pointing at a device
+// that has been unplugged, hands the page a perfectly flat zero. Downstream
+// that is indistinguishable from "nobody is singing", so both the harmony and
+// the conversation die silently and look like broken features. It has to be
+// caught at the source. This threshold separates digital silence from any real
+// signal at all — room noise with AGC on sits orders of magnitude above it, so
+// a quiet singer is never mistaken for a dead device.
+const SILENT_RMS = 0.00002
+const PROBE_MS = 700
+
+const MIC_AUDIO = {
+  echoCancellation: false,  // would fight the harmony from the speakers
+  noiseSuppression: false,  // would chew up sustained sung vowels
+  // Left ON deliberately: without it this hardware delivered an RMS of
+  // 0.002 for real singing, ten times too quiet to detect at all.
+  autoGainControl: true,
+}
+
+/**
+ * Open a microphone that is actually producing audio.
+ *
+ * Tries the Windows default first — that is the one the user chose — and only
+ * if it proves silent does it walk the other inputs. Returns the level it
+ * measured so the caller can say so plainly when every device is dead.
+ */
+async function openLiveMic(ctx) {
+  const probe = async (audio) => {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio })
+    const src = ctx.createMediaStreamSource(stream)
+    const an = ctx.createAnalyser()
+    an.fftSize = 2048
+    src.connect(an)
+    const buf = new Float32Array(an.fftSize)
+    let peak = 0
+    const until = performance.now() + PROBE_MS
+    while (performance.now() < until) {
+      await new Promise((r) => setTimeout(r, 50))
+      an.getFloatTimeDomainData(buf)
+      let sum = 0
+      for (let i = 0; i < buf.length; i += 1) sum += buf[i] * buf[i]
+      peak = Math.max(peak, Math.sqrt(sum / buf.length))
+    }
+    src.disconnect()
+    const track = stream.getAudioTracks()[0]
+    return { stream, peak, label: track?.label || 'default microphone' }
+  }
+
+  const first = await probe(MIC_AUDIO)
+  if (first.peak > SILENT_RMS) return first
+
+  let inputs = []
+  try {
+    inputs = (await navigator.mediaDevices.enumerateDevices())
+      .filter((d) => d.kind === 'audioinput' && d.deviceId && d.deviceId !== 'default')
+  } catch { /* label enumeration can be refused; the default is all we have */ }
+
+  for (const d of inputs) {
+    let cand = null
+    try {
+      cand = await probe({ ...MIC_AUDIO, deviceId: { exact: d.deviceId } })
+    } catch { continue }
+    if (cand.peak > SILENT_RMS) {
+      first.stream.getTracks().forEach((t) => t.stop())
+      return cand
+    }
+    cand.stream.getTracks().forEach((t) => t.stop())
+  }
+  return first   // everything is silent; the caller reports it rather than hiding it
+}
+
 export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [listening, setListening] = useState(false)
   const [mode, setMode] = useState('imitate')      // 'imitate' = sing back
@@ -82,6 +157,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [heardLyric, setHeardLyric] = useState(null)
   const [heardSong, setHeardSong] = useState(null)
   const [diag, setDiag] = useState(null)
+  const [device, setDevice] = useState(null)
 
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
@@ -100,6 +176,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const holdingRef = useRef(false)
   const boundsRef = useRef([])
   const sustainRef = useRef({ midi: null, since: 0 })
+  const voiceSinceRef = useRef(0)
   const lyricsRef = useRef(null)
   const lyricWindowRef = useRef(null)
   const lyricHintAtRef = useRef(0)
@@ -248,20 +325,13 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
     if (startingRef.current || listeningRef.current) return
     startingRef.current = true
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: false,  // would fight the harmony from the speakers
-          noiseSuppression: false,  // would chew up sustained sung vowels
-          // Left ON deliberately: without it this hardware delivered an RMS of
-          // 0.002 for real singing, ten times too quiet to detect at all.
-          autoGainControl: true,
-        },
-      })
-      streamRef.current = stream
-
       const ctx = ctxRef.current ?? new (window.AudioContext || window.webkitAudioContext)()
       ctxRef.current = ctx
       await ctx.resume()
+
+      const mic = await openLiveMic(ctx)
+      streamRef.current = mic.stream
+      setDevice({ label: mic.label, silent: mic.peak <= SILENT_RMS })
       // Autoplay policy: a context created without a gesture stays suspended.
       // Listening works regardless, but the harmony would be silent.
       setAudioBlocked(ctx.state !== 'running')
@@ -301,7 +371,9 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
 
       startClips()
       setListening(true)
-      setStatus('Listening — just start singing.')
+      setStatus(mic.peak <= SILENT_RMS
+        ? 'Microphone is silent — check it is not muted in Windows, then reload.'
+        : 'Listening — just start singing.')
       armFailuresRef.current = 0
 
       let lastAnalysis = 0
@@ -356,7 +428,11 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
           }
         }
 
-        if (hz > 0 && !selfHeard) {
+        const singerVoiced = hz > 0 && !selfHeard
+        if (!singerVoiced) voiceSinceRef.current = 0
+        else if (!voiceSinceRef.current) voiceSinceRef.current = now
+
+        if (singerVoiced) {
           setPitch({ hz, clarity })
           lastVoicedRef.current = now
           hasSungRef.current = true
@@ -431,7 +507,9 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
               player.hold(); setHold(true); setStatus('Holding for you…')
             }
           } else if (holdingRef.current) {
-            if (hz > 0) {
+            const singingAgain = voiceSinceRef.current
+              && now - voiceSinceRef.current >= RESUME_VOICE
+            if (singingAgain) {
               player.resume(); setHold(false); setStatus('Carrying on.')
             } else if (quiet > SILENCE_END) {
               setStatus('Finished — you stopped singing.')
