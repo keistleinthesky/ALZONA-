@@ -60,6 +60,10 @@ const CONTOUR_MEMORY = 12
 // without the answer arriving too late to be useful.
 const CLIP_MS = 4000
 
+// Standard choral shorthand. Truncating the names instead gave "sopr"/"teno",
+// which reads like a glitch on a projector.
+const PART_LABEL = { soprano: 'Sop', alto: 'Alto', tenor: 'Ten', bass: 'Bass' }
+
 export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [listening, setListening] = useState(false)
   const [mode, setMode] = useState('imitate')      // 'imitate' = sing back
@@ -325,7 +329,34 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
         const now = ctx.currentTime
         const player = playerRef.current
 
-        if (hz > 0) {
+        // Self-hearing guard. Without headphones the microphone picks up
+        // ALZONA's own harmony, which is sustained and steady — exactly what
+        // the tracking is looking for. Left unchecked she locks onto herself
+        // and harmonises with her own voice instead of the singer's.
+        let selfHeard = false
+        if (hz > 0 && player?.playing && matchRef.current) {
+          const head = player.playhead
+          const lead = cacheRef.current.manifest?.lead_in ?? 0
+          const semis = matchRef.current.semitoneOffset || 0
+          for (const part of activePartsRef.current) {
+            const notes = cacheRef.current.contours?.[part]?.notes
+            if (!notes) continue
+            const cur = notes.find((n) => {
+              const ns = n.t - lead
+              return head >= ns && head < ns + n.d
+            })
+            if (!cur) continue
+            // Within a third of a semitone of what she is singing right now.
+            // A singer would have to be in exact unison to be mistaken for it,
+            // and in unison there is no harmony to track anyway.
+            if (Math.abs(midiFromHz(hz) - (cur.midi + semis)) < 0.35) {
+              selfHeard = true
+              break
+            }
+          }
+        }
+
+        if (hz > 0 && !selfHeard) {
           setPitch({ hz, clarity })
           lastVoicedRef.current = now
           hasSungRef.current = true
@@ -368,9 +399,17 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
               joiningRef.current = true
               matchRef.current = id.match
               setMatched(id.match)
-              const chosen = modeRef.current === 'harmonize' && partsRef.current.length
-                ? partsRef.current
-                : [counterpart(id.part, SINGER_PARTS)]
+              // Never sing the line the singer is already on. A commanded part
+              // is honoured, EXCEPT where it turns out to be their own part —
+              // that is doubling, not harmony, and it sounds like ALZONA
+              // singing to herself. Soprano and alto swap, as agreed.
+              let chosen = [counterpart(id.part, SINGER_PARTS)]
+              if (modeRef.current === 'harmonize' && partsRef.current.length) {
+                const others = partsRef.current.filter((p) => p !== id.part)
+                chosen = others.length
+                  ? others
+                  : [counterpart(id.part, SINGER_PARTS)]
+              }
               const elapsed = (now - startedAtRef.current) - sung[0].start
               joinAt(player, id.match, elapsed, now, chosen, id.part)
             }
@@ -411,6 +450,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
             distinct: distinct.length, need: MIN_DISTINCT_TO_MATCH,
             lyric: lyricWindowRef.current ? 'yes' : 'no',
             matched: matchRef.current ? `${matchRef.current.time.toFixed(1)}s` : 'no',
+            self: selfHeard,
           })
           if (nowMs - lastSent > 1000) {
             lastSent = nowMs
@@ -420,7 +460,8 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
               `hz=${hz > 0 ? hz.toFixed(0) : '-'} clar=${clarity.toFixed(2)} ` +
               `distinct=${distinct.length}/${MIN_DISTINCT_TO_MATCH} ` +
               `lyric=${lyricWindowRef.current ? 'Y' : 'n'} ` +
-              `matched=${matchRef.current ? matchRef.current.time.toFixed(1) + 's' : 'no'}`)
+              `matched=${matchRef.current ? matchRef.current.time.toFixed(1) + 's' : 'no'} ` +
+              `self=${selfHeard ? 'Y' : 'n'}`)
             fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
           }
         }
@@ -521,7 +562,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
                     on ? '' : 'bg-white/10 text-white/60 hover:bg-white/20'
                   }`}
                 >
-                  {p.slice(0, 4)}
+                  {PART_LABEL[p]}
                 </button>
               )
             })}
