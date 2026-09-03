@@ -111,6 +111,17 @@ def _key_blocked_error(msg):
                 "quota", " 403", "429"))
 
 
+def _overloaded_error(msg):
+    """True when Gemini itself is busy — transient, and NOT a key problem."""
+    m = msg.lower()
+    return any(s in m for s in ("unavailable", " 503", "high demand", "overloaded"))
+
+
+# Short waits: long enough for a demand spike to pass, short enough that a
+# visitor standing in front of the robot does not think it has frozen.
+_OVERLOAD_BACKOFF = (1.5, 3.0)
+
+
 def gen_content(**kwargs):
     """client.models.generate_content with automatic key failover. If the active
     key is billing-blocked or rate-limited, transparently retry on the next key
@@ -133,6 +144,20 @@ def gen_content(**kwargs):
             if step < n - 1 and _key_blocked_error(str(e)):
                 print(f"Gemini key #{idx + 1} blocked ({str(e)[:70]}); trying next key…")
                 continue
+            # Server-side overload is temporary and has nothing to do with the
+            # key, so switching keys would not help — waiting briefly does.
+            # Without this a passing demand spike surfaces to the visitor as
+            # "I'm having trouble answering right now" mid-demonstration.
+            if _overloaded_error(str(e)):
+                for wait in _OVERLOAD_BACKOFF:
+                    print(f"Gemini busy; retrying in {wait}s…")
+                    time.sleep(wait)
+                    try:
+                        return _gemini_clients[idx].models.generate_content(**kwargs)
+                    except Exception as retry_err:
+                        last_err = retry_err
+                        if not _overloaded_error(str(retry_err)):
+                            raise
             raise
     raise last_err   # pragma: no cover — loop always returns or raises
 
@@ -178,9 +203,8 @@ Rules:
     * "Eol ma ye yo?" → CORRECT: a natural Korean reply like
       「무엇의 가격이 궁금하신가요?」  WRONG: an English explanation of the phrase.
 - Answer length has TWO tiers — pick the right one:
-    * DEFAULT (a simple, factual question): about 25 WORDS or fewer. One clear,
-      complete sentence stating the exact fact asked PLUS the single most useful
-      detail.
+    * DEFAULT (a simple, factual question): at most 20 WORDS, and at most TWO
+      sentences. State the exact fact asked plus the single most useful detail.
     * LONGER (the user explicitly asks for detail — "explain", "tell me more",
       "in detail", "why", "how did", "compare" — or the question genuinely needs
       several steps to answer): up to 50 WORDS. Use two or three tight sentences.
@@ -1454,30 +1478,40 @@ def detect_sing_command(text):
 # Each is capped at ONE sentence — enforced in the prompt AND trimmed after,
 # because a vision model will happily write a paragraph about a coin.
 COIN_FIELDS = [
-    ("country",      "Nationality / Country",           "\U0001F1F5\U0001F1ED"),
-    ("denomination", "Currency & Denomination",         "\U0001F4B0"),
-    ("year",         "Year of Issue",                   "\U0001F4C5"),
-    ("featured",     "Person / Symbol Featured",        "\U0001F464"),
-    ("significance", "Historical & Cultural Significance", "\U0001F3DB"),
+    ("country",      "Nationality / Country",              "\U0001F1F5\U0001F1ED\U0001F1ED\U0001F1F7"),
+    ("denomination", "Currency & Denomination",            "\U0001F4B0"),
+    ("featured",     "Person / Symbol Featured",           "\U0001F464"),
+    ("significance", "Historical & Cultural Significance", "\U0001F3DB️"),
+]
+
+# Reported alongside the four descriptions rather than as one of them: these are
+# judgements about the coin, not descriptions of it.
+COIN_EXTRAS = [
+    ("authenticity",    "Real or Fake",  "\U0001F50E"),
+    ("other_countries", "Used Elsewhere", "\U0001F30D"),
 ]
 
 _COIN_PROMPT = """You are identifying a coin held up to a camera.
 
-Look at the coin in this image and report EXACTLY these five fields:
+Look at the coin in this image and report EXACTLY these six fields:
 1. country - the nation that issued it
 2. denomination - the currency and face value
-3. year - the year of issue stamped on it
-4. featured - the person, animal, or symbol shown on it
-5. significance - its historical and cultural significance
+3. featured - the person, animal, or symbol shown on it
+4. significance - its historical and cultural significance
+5. authenticity - whether it looks genuine or counterfeit, and what tells you:
+   strike quality, lettering, edge, colour, wear. Say plainly when the image is
+   not clear enough to judge — a confident guess here is worse than no answer.
+6. other_countries - whether this same coin, or the same design or currency, is
+   or was used in any other country. Say so plainly if it is used only here.
 
 Rules:
 - Reply with ONE SENTENCE per field. Never more than one sentence.
 - Keep each sentence under 20 words, natural and warm, not a bare label.
-- If a detail is genuinely not visible (e.g. the year is worn or the coin is
-  face-down), say so plainly in that field's sentence instead of guessing.
+- If a detail is genuinely not visible (worn, blurred, face-down), say so in
+  that field's sentence instead of guessing.
 - If the image contains NO coin at all, reply with exactly: NO_COIN
-- Return ONLY a JSON object with the keys: country, denomination, year,
-  featured, significance. No markdown, no code fence, no extra text."""
+- Return ONLY a JSON object with the keys: country, denomination, featured,
+  significance, authenticity, other_countries. No markdown, no code fence."""
 
 
 def _first_sentence(text, max_words=24):
@@ -1516,7 +1550,7 @@ def identify_coin(jpeg_bytes):
                 return {"ok": False, "error": "I couldn't read that coin clearly."}
             data = json.loads(m.group(0))
         fields = []
-        for key, label, emoji in COIN_FIELDS:
+        for key, label, emoji in COIN_FIELDS + COIN_EXTRAS:
             fields.append({"key": key, "label": label, "emoji": emoji,
                            "text": _first_sentence(data.get(key, ""))})
         # One spoken line covering all five, so the voice reply matches the panel.
@@ -1875,7 +1909,7 @@ _LONG_ANSWER_CUES = (
 )
 
 # Word budgets for the two answer tiers (see _SYSTEM_INSTRUCTION "Answer length").
-_WORDS_SHORT = 25
+_WORDS_SHORT = 20
 _WORDS_LONG = 50
 
 
@@ -2092,8 +2126,8 @@ def route_command(transcript):
             )
         else:
             length_rule = (
-                "Give ONE clear, informative sentence of about 25 WORDS or fewer "
-                "that answers exactly and adds the single most useful detail."
+                "Answer in at most 20 WORDS and at most two sentences, stating "
+                "the fact asked plus the single most useful detail."
             )
         parts.append(
             f"({lang_rule} {length_rule} Answer ONLY — do NOT add a follow-up "
@@ -2193,6 +2227,120 @@ async def identify_coin_endpoint():
         tts = await run_in_threadpool(fast_voice, result["spoken"])
         result["tts_url"] = f"/tts/{tts}" if tts else None
     return result
+
+
+_anthem_lines_cache = None
+
+
+def _anthem_lines():
+    """The anthem's lyric lines, in order, from the aligned lyrics file."""
+    global _anthem_lines_cache
+    if _anthem_lines_cache is None:
+        try:
+            path = os.path.join(BASE, "source", "harmony", "lyrics.json")
+            with open(path, encoding="utf-8") as f:
+                _anthem_lines_cache = [l["text"] for l in json.load(f)["lines"]]
+        except Exception as e:
+            print("lyrics unavailable:", str(e)[:80])
+            _anthem_lines_cache = []
+    return _anthem_lines_cache
+
+
+@app.post('/listen')
+async def listen(file: UploadFile = File(...)):
+    """One ear for everything: decide whether a clip is SINGING or SPEECH.
+
+    The browser's SpeechRecognition insists on owning the microphone, so it
+    cannot run alongside the continuous pitch tracking the harmony needs — one
+    starves the other and BOTH features stop working, which is exactly what was
+    measured: recognition restarting every second and hearing nothing, while the
+    singing side received no audio either.
+
+    Routing every clip through here instead means a single always-open
+    microphone serves both. ALZONA hears singing and harmonises, or hears a
+    question and answers it, with nothing to switch between and no command to
+    remember.
+    """
+    try:
+        data = await file.read()
+        if not data:
+            return {"kind": "none", "error": "empty audio"}
+        lines = _anthem_lines()
+        numbered = "\n".join(f"{i}: {t}" for i, t in enumerate(lines))
+        prompt = (
+            "Listen to this short clip and decide what it is.\n\n"
+            "If the person is SINGING, the song ALZONA knows is the Philippine "
+            "national anthem, Lupang Hinirang. Its lines, numbered:\n\n"
+            + numbered +
+            "\n\nIf the person is SPEAKING — asking a question, giving an "
+            "instruction, or talking — transcribe what they said.\n\n"
+            "Reply with ONLY a JSON object:\n"
+            '  "kind"  - "singing", "speech", or "none" for silence or noise\n'
+            '  "line"  - when singing: which numbered line they START on, or '
+            "null if the words are unclear\n"
+            '  "song"  - when singing: the title you recognise, else null\n'
+            '  "text"  - when speaking: what they said, verbatim\n\n'
+            "Sung words stretch across held notes; speech does not. Judge the "
+            "line from words you can actually hear, never from the tune alone — "
+            "several lines share a melody. Do not default to line 0."
+        )
+        r = await run_in_threadpool(
+            gen_content,
+            model=CHAT_MODEL,
+            contents=[types.Part.from_bytes(data=data, mime_type="audio/webm"), prompt],
+            config=GEN_CONFIG_FAST)
+        raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", (r.text or "").strip())
+        try:
+            info = json.loads(raw)
+        except Exception:
+            m = re.search(r"\{.*\}", raw, re.S)
+            info = json.loads(m.group(0)) if m else {}
+
+        kind = (info.get("kind") or "none").lower()
+
+        if kind == "singing":
+            idx = info.get("line")
+            idx = int(idx) if str(idx).isdigit() else None
+            ok = idx is not None and 0 <= idx < len(lines)
+            return {"kind": "singing", "song": info.get("song"),
+                    "index": idx if ok else None,
+                    "text": lines[idx] if ok else None}
+
+        if kind == "speech":
+            said = (info.get("text") or "").strip()
+            if not said:
+                return {"kind": "none"}
+            result = await run_in_threadpool(route_command, said)
+            reply = result.get("reply", "")
+            tts = await run_in_threadpool(fast_voice, reply) if reply else None
+            return {"kind": "speech", "transcript": said, "reply": reply,
+                    "mode": result.get("mode", "chat"),
+                    "image_url": result.get("image_url"),
+                    "video_url": result.get("video_url"),
+                    "coin": result.get("coin"), "sing": result.get("sing"),
+                    "tts_url": f"/tts/{tts}" if tts else None}
+
+        return {"kind": "none"}
+    except Exception as e:
+        print("listen error:", str(e)[:120])
+        return {"kind": "none", "error": str(e)[:80]}
+
+
+@app.post('/debug_log')
+async def debug_log(line: str = Form(...)):
+    """Take a diagnostic line from the browser and append it to a file.
+
+    The singing features run entirely in the browser, so without this there is
+    no server-side trace of what the microphone actually delivered — and that
+    trace is what found every real bug in this feature.
+    """
+    try:
+        path = os.path.join(BASE, "static", "sing_debug.log")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')}  {line[:400]}\n")
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:80]}
+    return {"ok": True}
 
 
 @app.get('/state')
