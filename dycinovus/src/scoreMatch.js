@@ -20,14 +20,61 @@ export const midiFromHz = (hz) => 69 + 12 * Math.log2(hz / A4)
  * @param {number} minDur  drop anything shorter — pitch wobble between notes
  *   otherwise shows up as spurious one-frame "notes" and wrecks the intervals.
  */
-export function framesToNotes(frames, minDur = 0.09) {
-  const notes = []
+// How far the voice must move from the note it is on before that counts as a
+// NEW note. A singer holding one pitch drifts by a quarter tone constantly, and
+// rounding every frame independently turned that drift into alternating notes:
+// one steady G came back as F#, G, F#, G. Those fake steps are what the matcher
+// then tried to find in the anthem, which is why a correctly heard voice could
+// still fail to match anything.
+const HOLD_BAND = 0.65
+
+// Frames further apart than this are not the same note, however close in pitch.
+// Without it a pause of any length is swallowed into whatever came before.
+const MAX_FRAME_GAP = 0.25
+
+// Frames used for the running median. Wide enough to ride over a single bad
+// reading, short enough not to smear a real step between two notes.
+const SMOOTH_WINDOW = 5
+
+/**
+ * Turn a stream of pitch frames into notes.
+ *
+ * Two guards against a human voice, both learned from live telemetry:
+ * a running median so one stray frame cannot split a note, and a hold band so
+ * ordinary drift around a semitone boundary does not either.
+ */
+export function framesToNotes(frames, minDur = 0.09, {
+  holdBand = HOLD_BAND,
+  smooth = SMOOTH_WINDOW,
+  maxGap = MAX_FRAME_GAP,
+} = {}) {
+  const pts = []
   for (const f of frames) {
     if (!f.hz || f.hz <= 0) continue
-    const midi = Math.round(midiFromHz(f.hz))
-    const last = notes[notes.length - 1]
-    if (last && last.midi === midi) last.end = f.t
-    else notes.push({ midi, start: f.t, end: f.t })
+    pts.push({ t: f.t, m: midiFromHz(f.hz) })
+  }
+  if (!pts.length) return []
+
+  const half = Math.max(0, Math.floor(smooth / 2))
+  const smoothed = pts.map((p, i) => {
+    const lo = Math.max(0, i - half)
+    const hi = Math.min(pts.length, i + half + 1)
+    const w = pts.slice(lo, hi).map((x) => x.m).sort((a, b) => a - b)
+    return { t: p.t, m: w[Math.floor(w.length / 2)] }
+  })
+
+  const notes = []
+  let cur = null
+  let prevT = null
+  for (const p of smoothed) {
+    const gapped = prevT !== null && p.t - prevT > maxGap
+    prevT = p.t
+    if (cur && !gapped && Math.abs(p.m - cur.midi) <= holdBand) {
+      cur.end = p.t
+      continue
+    }
+    cur = { midi: Math.round(p.m), start: p.t, end: p.t }
+    notes.push(cur)
   }
   return notes.filter((n) => n.end - n.start >= minDur)
 }

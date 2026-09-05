@@ -12,6 +12,8 @@ import {
   identifyPart,
 } from './scoreMatch'
 import { lyricWindow } from './lyricsMatch'
+import { markSpeaking, hearingSelf } from './selfVoice'
+import { isHandBackPhrase } from './wake'
 
 // =============================================================================
 // LUPANG HINIRANG — harmony that answers a live singer
@@ -56,6 +58,9 @@ const IDLE_ANALYSIS_INTERVAL = 0.05
 // briefly held by something else). The delay climbs to this ceiling and stays.
 const ARM_RETRY_MIN = 600
 const ARM_RETRY_MAX = 8000
+// After this many consecutive failures the harmony stops trying and hands the
+// microphone back to the conversation. Roughly ten seconds of retries.
+const ARM_GIVE_BACK_AFTER = 5
 
 // How long to trust a lyric hint that is not producing a match. Beyond this the
 // hint was wrong, and keeping it would block matching for good.
@@ -143,7 +148,17 @@ async function openLiveMic(ctx) {
   return first   // everything is silent; the caller reports it rather than hiding it
 }
 
-export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
+export default function Sing({
+  baseUrl,
+  armed,
+  onClear,
+  onHeardSpeech,
+  // True only while ALZONA is meant to be listening for SINGING. Off by
+  // default: the microphone belongs to the conversation until someone asks for
+  // the harmony, and only one of the two may hold it — see wake.js.
+  active = false,
+  onActiveChange = () => {},
+}) {
   const [listening, setListening] = useState(false)
   const [mode, setMode] = useState('imitate')      // 'imitate' = sing back
   // Empty means decide automatically. A part can still be forced, by button or
@@ -152,7 +167,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const [autoPart, setAutoPart] = useState(null)
   const [audioBlocked, setAudioBlocked] = useState(false)
   const [pitch, setPitch] = useState({ hz: 0, clarity: 0 })
-  const [status, setStatus] = useState('Listening…')
+  const [status, setStatus] = useState('Say “Alzona, harmonise with me” to start.')
   const [playhead, setPlayhead] = useState(0)
   const [holding, setHolding] = useState(false)
   const [manifest, setManifest] = useState(null)
@@ -195,6 +210,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   const modeRef = useRef(mode)
   const partsRef = useRef(parts)
   const activePartsRef = useRef([])
+  const onActiveChangeRef = useRef(onActiveChange)
 
   // The line ALZONA is on: a forced choice in Harmonise, else the counterpart
   // of whatever the singer was identified as. Memoised so the effect mirroring
@@ -210,6 +226,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   useEffect(() => { partsRef.current = parts }, [parts])
   useEffect(() => { listeningRef.current = listening }, [listening])
   useEffect(() => { activePartsRef.current = activeParts }, [activeParts])
+  useEffect(() => { onActiveChangeRef.current = onActiveChange }, [onActiveChange])
 
   // A spoken command selects parts and switches to Harmonise.
   useEffect(() => {
@@ -281,17 +298,33 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
   // ---- clips: words, and questions -----------------------------------------
   const startClips = useCallback(() => {
     if (!streamRef.current || clipRecorderRef.current) return
-    const send = async (blob) => {
+    let clipStartedAt = performance.now()
+    const send = async (blob, startedAt) => {
       if (blob.size < 3000) return
+      // Her reply was playing into this microphone while the clip was being
+      // recorded, so what it holds is her own voice. Sending it would come back
+      // as a question and she would answer herself, and then answer that. The
+      // singer loses nothing: the melody is tracked separately, frame by frame.
+      if (hearingSelf(startedAt)) return
       try {
         const fd = new FormData()
         fd.append('file', blob, 'clip.webm')
         const data = await fetch(`${baseUrl}/listen`, { method: 'POST', body: fd })
           .then((r) => r.json())
 
-        if (data.kind === 'speech' && data.reply) {
-          onHeardSpeech?.(data)          // a question — answer it, leave singing alone
-          return
+        if (data.kind === 'speech') {
+          // Her name on its own is the singer asking for the microphone back,
+          // not a question. It has to be caught BEFORE the reply is used, or
+          // she answers "Alzona" with small talk and carries on holding the
+          // microphone — which is the one state with no way out but the mouse.
+          if (isHandBackPhrase(data.transcript)) {
+            onActiveChangeRef.current(false)
+            return
+          }
+          if (data.reply) {
+            onHeardSpeech?.(data)        // a question — answer it, leave singing alone
+            return
+          }
         }
         if (data.kind !== 'singing') return
         if (data.song) setHeardSong(data.song)
@@ -308,16 +341,19 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
       const chunks = []
       rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data) }
       rec.onstop = () => {
-        if (chunks.length) send(new Blob(chunks, { type: chunks[0].type }))
+        const startedAt = clipStartedAt
+        if (chunks.length) send(new Blob(chunks, { type: chunks[0].type }), startedAt)
         chunks.length = 0
         if (clipRecorderRef.current === rec) {
           try { rec.start() } catch { return }
+          clipStartedAt = performance.now()
           clipTimerRef.current = setTimeout(() => {
             try { rec.stop() } catch { /* already stopped */ }
           }, CLIP_MS)
         }
       }
       rec.start()
+      clipStartedAt = performance.now()
       clipRecorderRef.current = rec
       clipTimerRef.current = setTimeout(() => {
         try { rec.stop() } catch { /* already stopped */ }
@@ -403,7 +439,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
         for (let i = 0; i < buffer.length; i += 1) lvl += buffer[i] * buffer[i]
         lvl = Math.sqrt(lvl / buffer.length)
         const gate = floorRef.current.update(lvl)
-        const { hz, clarity } = detectPitch(buffer, ctx.sampleRate, gate)
+        const { hz, clarity, raw, why } = detectPitch(buffer, ctx.sampleRate, gate)
         const now = ctx.currentTime
         const player = playerRef.current
 
@@ -411,6 +447,12 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
         // ALZONA's own harmony, which is sustained and steady — exactly what
         // the tracking is looking for. Left unchecked she locks onto herself
         // and harmonises with her own voice instead of the singer's.
+        // The parts she plays are recorded human voices, so a clip taken
+        // while they sound comes back from /listen as speech and she answers
+        // her own singing. Marked every frame she is playing: the window then
+        // lapses on its own the moment the music stops.
+        if (player?.playing) markSpeaking()
+
         let selfHeard = false
         if (hz > 0 && player?.playing && matchRef.current) {
           const head = player.playhead
@@ -551,6 +593,7 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
               `lyric=${lyricWindowRef.current ? 'Y' : 'n'} ` +
               `matched=${matchRef.current ? matchRef.current.time.toFixed(1) + 's' : 'no'} ` +
               `self=${selfHeard ? 'Y' : 'n'} ` +
+              `why=${why || '-'}${raw ? ` raw=${raw.toFixed(0)}` : ''} ` +
               `mode=${modeRef.current} parts=${partsRef.current.join('+') || '-'} ` +
               `notes=[${seq}]`)
             fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
@@ -575,16 +618,33 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
         fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
       } catch { /* telemetry must never break the retry */ }
       teardown()
+      // Give the microphone back rather than hold it hostage. While the harmony
+      // is armed the conversation's recogniser is stopped, so a microphone that
+      // will not open — muted, unplugged, held by another app — would leave
+      // ALZONA unable to sing OR answer, with nothing on screen to say why.
+      // Retrying for ever is right when she is the one listening; it is not
+      // right when it costs everything else.
+      if (armFailuresRef.current >= ARM_GIVE_BACK_AFTER) {
+        setStatus('Could not open the microphone — back to answering questions.')
+        onActiveChangeRef.current(false)
+        return
+      }
       setArmTick((t) => t + 1)
     } finally {
       startingRef.current = false
     }
   }, [baseUrl, joinAt, startClips, teardown])
 
-  // ALWAYS listening. Detecting singing on its own is the whole feature, so
-  // there is nothing to press and nothing to say first.
+  // Listening ONLY while the harmony has been asked for.
+  //
+  // It used to listen always, and that quietly broke both features: the
+  // conversation's speech recogniser insists on owning the microphone, so the
+  // two restarted each other out of the device all day. Now the microphone is
+  // held by exactly one of them, and "Alzona, harmonise with me" is what moves
+  // it. Once asked for, the retries are as stubborn as before — a listener
+  // that gives up looks exactly like a broken robot.
   useEffect(() => {
-    if (listening) return undefined
+    if (!active || listening) return undefined
     const n = armFailuresRef.current
     const delay = autoStartedRef.current
       ? Math.min(ARM_RETRY_MIN * 2 ** n, ARM_RETRY_MAX)
@@ -592,7 +652,18 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
     autoStartedRef.current = true
     const id = setTimeout(() => { start() }, delay)
     return () => clearTimeout(id)
-  }, [listening, start, armTick])
+  }, [active, listening, start, armTick])
+
+  // Give the microphone back the moment the harmony is no longer wanted, and
+  // come to it fresh next time rather than resuming a stale backoff.
+  useEffect(() => {
+    if (active) {
+      armFailuresRef.current = 0
+      autoStartedRef.current = false
+      return
+    }
+    if (listeningRef.current) teardown()
+  }, [active, teardown])
 
   // Any interaction is enough to let audio play; take the first one we get.
   useEffect(() => {
@@ -624,19 +695,33 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
           <p className="text-xs uppercase tracking-[0.35em] text-white/50">Lupang Hinirang</p>
           <h2 className="mt-1 text-lg font-bold text-white">Sing &amp; Harmonise</h2>
         </div>
-        {listening ? (
-          <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
-            listening
-          </div>
-        ) : (
-          // Always-listening is the feature, but when arming fails there has to
-          // be something to press. Without it the only cure was a page reload.
+        {/* Also the manual way in and out. The spoken triggers are the point,
+            but a demo that can only be driven by voice has no cure when the
+            room is loud — and being stuck holding the microphone is worse than
+            never taking it. */}
+        {active ? (
+          // One button, and it always gives the microphone BACK. Branching on
+          // `listening` instead left a panel that had asked for the microphone
+          // and not got it offering only "start again" — no way out, and the
+          // conversation stayed suspended behind it.
           <button
             type="button"
-            onClick={() => { armFailuresRef.current = 0; start() }}
+            onClick={() => onActiveChange(false)}
+            className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+              listening
+                ? 'border-fuchsia-400/30 bg-fuchsia-400/10 text-fuchsia-200 hover:bg-fuchsia-400/20'
+                : 'border-amber-400/40 bg-amber-400/15 text-amber-200 hover:bg-amber-400/25'
+            }`}
+          >
+            {listening ? 'listening · stop' : 'starting… · cancel'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { armFailuresRef.current = 0; onActiveChange(true) }}
             className="rounded-full border border-amber-400/40 bg-amber-400/15 px-3 py-1 text-xs font-semibold text-amber-200 transition hover:bg-amber-400/25"
           >
-            Start listening
+            Sing to me
           </button>
         )}
       </div>
@@ -742,8 +827,9 @@ export default function Sing({ baseUrl, armed, onClear, onHeardSpeech }) {
       )}
       <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>
       <p className="mt-1 text-[10px] text-white/30">
-        Just start singing — ALZONA finds your place and joins in. Use headphones,
-        or the microphone hears her instead of you.
+        {listening
+          ? 'Sing — ALZONA finds your place and joins in. Say “Alzona” when you are done and she goes back to answering questions. Use headphones, or the microphone hears her instead of you.'
+          : 'Say “Alzona, harmonise with me” and she takes the microphone for singing. Until then it belongs to the conversation.'}
       </p>
     </section>
   )

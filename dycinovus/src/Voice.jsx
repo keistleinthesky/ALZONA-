@@ -1,15 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { markSpeaking, hearingSelf, followAudio } from "./selfVoice";
+// Her name lives in wake.js because the singing panel has to recognise it
+// too — that is how the microphone gets handed back.
+import { NAME, NAME_CJK } from "./wake";
 
 // Uses the browser's built-in speech recognition (Chrome/Edge). This returns the
 // user's ACTUAL words — or nothing on silence — so it never hallucinates random
 // text the way audio-to-Gemini transcription does. It's also free (no quota).
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-// Name variants cover common speech-recognition mishearings of "Alzona",
-// including how Japanese/Korean/Chinese recognition writes the name.
-const NAME = "(?:al\\s?zona|alsona|elzona|al\\s?sona|arizona|alona)";
-const NAME_CJK =
-  "(?:アルゾナ|アルソナ|アルゾーナ|アルソーナ|알조나|알소나|알존아|阿尔佐纳|阿尔索纳|阿爾佐納|阿爾索納|奥佐娜)";
 
 // Greetings in CJK scripts (no \b word boundaries — they don't work for CJK).
 const GREET_CJK =
@@ -48,7 +46,14 @@ const SR_LANGS = [
   { code: "zh-CN", label: "中文" },
 ];
 
-export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onResult = () => {} }) {
+export default function VoiceRecorder({
+  baseUrl = "http://localhost:5002",
+  onResult = () => {},
+  // True while the singing panel holds the microphone. Recognition insists on
+  // owning the device, so it must actually STOP — not merely ignore what it
+  // hears — or it restarts the singing side out of the microphone every second.
+  suspended = false,
+}) {
 
   const [recording, setRecording] = useState(false);
   const [responseText, setResponseText] = useState("");
@@ -59,6 +64,10 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
 
   // Ref mirrors so speech-recognition callbacks always see current values.
   const awakeRef = useRef(false);
+  // Mirrored into a ref: the recognition callbacks and the 1s poll are both
+  // closures created before a handover happens, and would otherwise keep
+  // seeing the old value and grab the microphone straight back.
+  const suspendedRef = useRef(false);
   const srLangRef = useRef("en-US");
 
   const changeSrLang = (code) => {
@@ -118,7 +127,7 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
   };
 
   const startRecording = () => {
-    if (!SR || recording || busyRef.current) return;
+    if (!SR || recording || busyRef.current || suspendedRef.current) return;
     busyRef.current = true;
     const r = new SR();
     r.lang = srLangRef.current;   // user-selected recognition language
@@ -214,9 +223,23 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
     try { r.start(); } catch { busyRef.current = false; }
   };
 
-  const stopRecording = () => {
+  const stopRecording = useCallback(() => {
     if (recognitionRef.current) recognitionRef.current.stop();
-  };
+  }, []);
+
+  // Hand the microphone over to the singing panel. Nothing here waits for
+  // recognition to finish its sentence: the singer is already singing, and a
+  // recogniser holding the device is exactly what stops the harmony hearing
+  // them. Coming back the other way needs no action — the 1s poll re-arms on
+  // its own once `suspended` clears.
+  useEffect(() => {
+    suspendedRef.current = suspended;
+    if (suspended) {
+      try { stopRecording(); } catch { /* already stopped */ }
+    }
+    // stopRecording is redefined every render; the body is idempotent, so
+    // re-running it costs nothing and keeps the dependency list honest.
+  }, [suspended, stopRecording]);
 
   // Speak a short phrase in ALZONA's own voice (backend /say). Falls back to
   // the browser voice only if the backend can't synthesize (e.g. TTS quota).
@@ -227,9 +250,13 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
       const res = await fetch(`${baseUrl}/say`, { method: "POST", body: form });
       const data = await res.json();
       if (data.tts_url) {
-        const audio = new Audio(`${baseUrl}${data.tts_url}?t=${Date.now()}`);
+        // followAudio, not just a flag here: this plays out of the same
+        // speakers the singing panel's microphone is listening to, and that
+        // panel has no other way of knowing this reply is hers.
+        const audio = followAudio(new Audio(`${baseUrl}${data.tts_url}?t=${Date.now()}`));
         audio.onended = finishBusy;
         audio.onerror = finishBusy;
+        markSpeaking();          // cover the gap before the first timeupdate
         await audio.play();
         return;
       }
@@ -238,9 +265,14 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
     }
     if ("speechSynthesis" in window) {
       const u = new SpeechSynthesisUtterance(text);
-      u.onend = finishBusy;
-      u.onerror = finishBusy;
+      // Synthesis reports no progress events worth trusting, so hold the
+      // window open on a timer and let it lapse the moment speaking stops.
+      const holdOpen = setInterval(() => markSpeaking(), 250);
+      const done = () => { clearInterval(holdOpen); markSpeaking(); finishBusy(); };
+      u.onend = done;
+      u.onerror = done;
       window.speechSynthesis.cancel();
+      markSpeaking();
       window.speechSynthesis.speak(u);
     } else {
       finishBusy();
@@ -267,7 +299,13 @@ export default function VoiceRecorder({ baseUrl = "http://localhost:5002", onRes
         const res = await fetch(`${baseUrl}/state`);
         if (!res.ok) return;
         const data = await res.json();
-        if (data.face_state === "ALZONA" && !recording && !busyRef.current) {
+        if (
+          data.face_state === "ALZONA" &&
+          !recording &&
+          !busyRef.current &&
+          !suspendedRef.current &&
+          !hearingSelf(performance.now())
+        ) {
           startRecording();
         }
       } catch {

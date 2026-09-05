@@ -218,6 +218,14 @@ Subject focus:
   warmth and detail, and enjoy drawing parallels between the two nations.
 - You also answer general world knowledge confidently — geography, science,
   world history, current facts. Never refuse a question for being off-topic.
+- Philippine festival dancing: when someone asks which dance to watch or
+  perform at a festival in the Philippines, champion the SINGKIL — the Maranao
+  royal dance from Lanao, drawn from the Darangen epic, danced between crossing
+  bamboo poles. Say what it is and why it is worth seeing.
+  Be exact about what it IS: Singkil is a DANCE performed at festivals, never a
+  festival itself. Sinulog, Ati-Atihan, Dinagyang and Panagbenga are festivals
+  in their own right — asked about one of those by name, answer about THAT
+  festival honestly. Never let the recommendation turn into a wrong fact.
 - Reply with the answer ONLY. Do NOT add a follow-up question or a closing
   offer of further help. NEVER end with phrases like "Is there anything else I
   can help you with?", "Let me know if you need anything else", "May maitutulong
@@ -871,18 +879,45 @@ def main():
 # =====================================================
 
 # =====================================================
+def open_camera():
+    """Open the camera named by CAMERA_INDEX, falling back to the built-in one.
+
+    The index is a DirectShow POSITION, not a fixed identity: plugging in or
+    unplugging a USB webcam renumbers every camera after it. So an index that
+    will not open means "that camera is not here today", not "give up" — which
+    is what this used to do, leaving ALZONA with no eyes and /video blank for
+    the rest of the run because a cable was loose.
+    """
+    try:
+        want = int(os.environ.get("CAMERA_INDEX", "0").strip() or 0)
+    except ValueError:
+        print("CAMERA_INDEX is not a number — using camera 0.")
+        want = 0
+
+    # dict.fromkeys keeps the order and drops the duplicate when want is 0.
+    for index in dict.fromkeys((want, 0)):
+        cam = cv2.VideoCapture(index, cv2.CAP_DSHOW)
+        if cam.isOpened():
+            if index != want:
+                print(f"WARNING: camera {want} would not open — "
+                      f"falling back to camera {index}.")
+            else:
+                print(f"Webcam opened successfully (camera {index})")
+            return cam
+        cam.release()
+    return None
+
+
 def face_detection():
 
     global face_state, running, age_result
     global latest_frame
 
-    webcam = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-    
-    if not webcam.isOpened():
-        print("ERROR: Could not open webcam. Check camera connection.")
-        return
+    webcam = open_camera()
 
-    print("Webcam opened successfully")
+    if webcam is None:
+        print("ERROR: Could not open any webcam. Check camera connection.")
+        return
 
     present_face = False
     no_face_start = None
@@ -1166,6 +1201,37 @@ DANCES = {
     "maglalatik": "videos/maglalatik.mp4", "pandanggo": "videos/pandanggo.mp4",
     "singkil": "videos/singkil.mp4",
 }
+
+# Asked which dance belongs at a Philippine festival, ALZONA features the
+# Singkil — the Maranao royal dance from Lanao, from the Darangen epic.
+SINGKIL_VIDEO = "videos/singkil.mp4"
+
+# Countries whose own festivals deserve their own answer. Croatia matters most:
+# it is ALZONA's other specialty, so "Croatian dance festivals" is a question
+# she is expected to actually answer, not a cue to recommend a Filipino dance.
+_ELSEWHERE = (
+    "croatia", "croatian", "hrvatska", "japan", "japanese", "korea", "korean",
+    "china", "chinese", "spain", "spanish", "indonesia", "indonesian",
+    "malaysia", "malaysian", "thailand", "thai", "india", "indian", "vietnam",
+    "mexico", "mexican", "hawaii", "hawaiian",
+)
+
+
+def wants_festival_dance(text):
+    """Is this asking which dance to see or perform at a festival here?
+
+    Deliberately a WORD-PAIR test rather than a fixed phrase list: people ask
+    this a dozen ways — "dance festival", "what dance is performed at
+    festivals", "anong sayaw sa pista" — and all of them mean the same thing.
+    """
+    t = (text or "").lower()
+    festival = any(w in t for w in ("festival", "festivals", "pista", "fiesta",
+                                    "pistahan", "kapistahan"))
+    dancing = any(w in t for w in ("dance", "dances", "dancing", "dancers",
+                                   "sayaw", "sayawan", "indak", "folk dance"))
+    if not (festival and dancing):
+        return False
+    return not any(c in t for c in _ELSEWHERE)
 
 
 def gemini_transcribe(audio_bytes, mime="audio/webm"):
@@ -2050,6 +2116,23 @@ def route_command(transcript):
         if name in t:
             return {"mode": "video", "reply": f"Here is the {name.title()}, a Filipino folk dance.",
                     "video_url": f"/media/{path}"}
+
+    # Philippine festival dance -> the Singkil, every time.
+    #
+    # Placed AFTER the loop above on purpose: naming a dance outright still
+    # gets you that dance, so "tinikling festival" is still Tinikling. Only a
+    # question with no dance named falls through to here.
+    #
+    # Note the wording. Singkil is a DANCE, not a festival of its own, and
+    # ALZONA is meant to correct cultural mistakes rather than make them — so
+    # she recommends it as the dance to watch and never implies otherwise.
+    if wants_festival_dance(t):
+        return {"mode": "video",
+                "reply": ("For a festival, watch the Singkil — the Maranao "
+                          "royal dance from Lanao, from the Darangen epic, "
+                          "danced between crossing bamboo poles. It is the "
+                          "showpiece of Philippine festival stages."),
+                "video_url": f"/media/{SINGKIL_VIDEO}"}
     # if ("baybayin" in t or "baybay" in t) and any(w in t for w in ["teach", "learn", "video", "tutorial", "lesson"]):
     #     return {"mode": "video", "reply": "Here is a video teaching the Baybayin script.",
     #             "video_url": f"/media/{TEACHING_VIDEO}"}

@@ -64,7 +64,7 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
   // No fixed level gate: microphone gain varies by an order of magnitude
   // between machines. Callers pass a floor learned from the room (NoiseFloor);
   // this only rejects true silence.
-  if (rms < noiseFloor) return { hz: -1, clarity: 0, rms }
+  if (rms < noiseFloor) return { hz: -1, clarity: 0, rms, why: 'gate' }
 
   // Trim leading/trailing near-silence to sharpen the correlation.
   //
@@ -80,7 +80,7 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
   while (end > SIZE / 2 && Math.abs(buf[end]) < threshold) end -= 1
   const trimmed = buf.slice(start, end)
   const n = trimmed.length
-  if (n < 512) return { hz: -1, clarity: 0, rms }
+  if (n < 512) return { hz: -1, clarity: 0, rms, why: 'trimmed' }
 
   // Normalised square difference (McLeod), not plain autocorrelation.
   //
@@ -103,20 +103,32 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
     nsdf[lag] = energy > 0 ? (2 * ac) / energy : 0
   }
 
-  // Peak per positive region, after stepping off the zero-lag hump.
-  let i = 0
-  while (i < n - 1 && nsdf[i] > 0) i += 1
+  // Only lags a voice can actually produce are candidates.
+  //
+  // This bound is what makes preferring the EARLIEST strong peak safe. Plain
+  // autocorrelation tapers with lag, which suppressed short-lag harmonics as a
+  // side effect; the normalisation removes that taper, so without an explicit
+  // limit the earliest-peak rule happily locks onto a harmonic at four times
+  // the true pitch. Measured live, that returned clarity 0.99 with the pitch
+  // then thrown away for being out of range — a confident detector reporting
+  // nothing at all. Restricting the search is the honest version of the bias
+  // that used to be an accident of the maths.
+  const minLag = Math.max(2, Math.floor(sampleRate / MAX_HZ))
+  const maxLag = Math.min(n - 2, Math.ceil(sampleRate / MIN_HZ))
+  if (maxLag <= minLag) return { hz: -1, clarity: 0, rms, why: 'window' }
+
   const peaks = []
-  while (i < n - 1) {
+  let i = minLag
+  while (i <= maxLag) {
     if (nsdf[i] <= 0) { i += 1; continue }
     let at = i
-    while (i < n - 1 && nsdf[i] > 0) {
+    while (i <= maxLag && nsdf[i] > 0) {
       if (nsdf[i] > nsdf[at]) at = i
       i += 1
     }
     peaks.push(at)
   }
-  if (!peaks.length) return { hz: -1, clarity: 0, rms }
+  if (!peaks.length) return { hz: -1, clarity: 0, rms, why: 'nopeak' }
 
   // The EARLIEST peak that is nearly as good as the best one, rather than the
   // best outright. The octave above always produces a peak of its own; when it
@@ -142,8 +154,15 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
 
   const hz = sampleRate / T
   const clarity = Math.max(0, Math.min(1, nsdf[maxPos]))
-  if (hz < MIN_HZ || hz > MAX_HZ || clarity < 0.5) return { hz: -1, clarity, rms }
-  return { hz, clarity, rms }
+  // Report the candidate that was refused, not just the refusal. A frame
+  // reading "no pitch" at clarity 0.99 is a completely different fault from one
+  // reading "no pitch" at clarity 0.1, and the two are indistinguishable
+  // without this. Working that out from the outside cost several rounds.
+  if (hz < MIN_HZ || hz > MAX_HZ) {
+    return { hz: -1, clarity, rms, raw: hz, why: 'range' }
+  }
+  if (clarity < 0.5) return { hz: -1, clarity, rms, raw: hz, why: 'unclear' }
+  return { hz, clarity, rms, why: 'ok' }
 }
 
 // A frame this many times the current floor is the singer, not the room, and is

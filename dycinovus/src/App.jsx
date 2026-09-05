@@ -5,6 +5,7 @@ import WRO26Logo from './assets/WRO26.png'
 import VoiceRecorder from './Voice'
 import Sing from './Sing'
 import Coin from './Coin'
+import { markSpeaking } from './selfVoice'
 
 const initialState = {
   face_state: 'idle',
@@ -42,6 +43,12 @@ function App() {
   const [coinFields, setCoinFields] = useState(null)  // the coin rows to show
   const [coinVerdict, setCoinVerdict] = useState(null)  // real / fake / unclear
   const [singCommand, setSingCommand] = useState(null) // armed by a spoken command
+  // Who holds the microphone. Exactly one of the two panels may: the speech
+  // recogniser in Voice owns the device while it runs, so the singing panel
+  // cannot listen at the same time — they simply restart each other. False
+  // means the conversation has it, which is the resting state.
+  const [singing, setSinging] = useState(false)
+
 
   const audioRef = useRef(null)
 
@@ -108,8 +115,13 @@ function App() {
     setVideoSrc(res.video_url || null)
     // A spoken "identify this coin" fills the coin panel just like the button.
     if (res.coin) setCoinFields(res.coin)
-    // A spoken "harmonize with me in alto" arms the singing panel.
-    if (res.sing) setSingCommand(res.sing)
+    // A spoken "harmonize with me in alto" arms the singing panel AND hands it
+    // the microphone. Arming alone used to be enough only because the singing
+    // panel was always listening anyway.
+    if (res.sing) {
+      setSingCommand(res.sing)
+      setSinging(true)
+    }
   }
 
   useEffect(() => {
@@ -198,6 +210,11 @@ function App() {
           autoPlay
           hidden
           src={audioSrc || undefined}
+          onPlay={() => markSpeaking()}
+          onPlaying={() => markSpeaking()}
+          onTimeUpdate={() => markSpeaking()}
+          onEnded={() => markSpeaking()}
+          onPause={() => markSpeaking()}
         />
 
         {/* Header */}
@@ -328,7 +345,7 @@ function App() {
             <div className="mt-3 space-y-2">
 
               <div>
-                <VoiceRecorder baseUrl={BASE_URL} onResult={applyResult} />
+                <VoiceRecorder baseUrl={BASE_URL} onResult={applyResult} suspended={singing} />
               </div>
 
               <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
@@ -423,6 +440,13 @@ function App() {
           <Sing
             baseUrl={BASE_URL}
             armed={singCommand}
+            active={singing}
+            // Set from three places: the spoken trigger above, "Alzona" heard
+            // while singing, and the button on the panel itself.
+            onActiveChange={(on) => {
+              setSinging(on)
+              if (!on) setSingCommand(null)
+            }}
             onClear={() => setSingCommand(null)}
             // ALZONA hears everything through the singing panel's microphone.
             // When what she heard was a question rather than singing, the answer
