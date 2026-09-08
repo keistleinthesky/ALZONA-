@@ -30,7 +30,10 @@ function StateItem({ label, value }) {
 function App() {
   // main.py serves the backend here. Use localhost on the same PC, or your PC's
   // LAN IP (e.g. http://192.168.1.85:5002) when opening the app from another device.
-  const BASE_URL = 'http://localhost:5002'
+  // Whatever host served this page is the host running the backend. Hardcoding
+  // localhost worked only on this machine: opened from a phone, "localhost"
+  // means the PHONE, so every request died and the site looked broken.
+  const BASE_URL = `http://${window.location.hostname}:5002`
   const [backendState, setBackendState] = useState(initialState)
   const [transcript, setTranscript] = useState('')
   const [reply, setReply] = useState('')
