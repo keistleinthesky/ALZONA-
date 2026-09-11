@@ -9,7 +9,8 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "leader": "vite --config vite.leader.config.js"
+    "leader": "vite --config vite.leader.config.js",
+    "console-leads": "vite --config vite.console-leads.config.js"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",

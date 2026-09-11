@@ -27,7 +27,18 @@ function StateItem({ label, value }) {
   )
 }
 
-function App() {
+/**
+ * The ALZONA console.
+ *
+ * `SingPanel` is the one thing that varies between the two consoles. They are
+ * the same program otherwise — same camera, chat, coin and Baybayin — and that
+ * is deliberate: keeping them as one App with two entry points means a fix to
+ * any shared feature lands in both, which copying the file would not give.
+ *
+ *   Sing    she listens, finds your place and follows you
+ *   Leader  she sounds the note, counts in, and starts
+ */
+function App({ SingPanel = Sing }) {
   // main.py serves the backend here. Use localhost on the same PC, or your PC's
   // LAN IP (e.g. http://192.168.1.85:5002) when opening the app from another device.
   // Whatever host served this page is the host running the backend. Hardcoding
@@ -440,7 +451,7 @@ function App() {
 
         {/* Row 2: singing + coin identification */}
         <div className="grid w-full gap-6 lg:grid-cols-2">
-          <Sing
+          <SingPanel
             baseUrl={BASE_URL}
             armed={singCommand}
             active={singing}

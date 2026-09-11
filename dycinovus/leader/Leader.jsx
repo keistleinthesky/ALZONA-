@@ -83,19 +83,23 @@ function createVoice(ctx, destination) {
 // pauses it while singing is in progress. This panel opens the microphone
 // itself, so it has to announce that, or recognition keeps restarting it out of
 // the device and neither side hears anything.
-// The recordings are served at /media/harmony by this app's own dev server
-// (see vite.leader.config.js), so nothing here needs the Python backend: no
-// API key, no camera, no network beyond this machine. That is the whole reason
-// it is a separate program rather than a tab in the console.
-const MEDIA_ROOT = ''
-
-export default function Leader() {
-  // Kept so the body below is the original, unedited. `armed` was a spoken
-  // command arriving from the console, which does not exist here.
-  const baseUrl = MEDIA_ROOT
-  const armed = null
-  const onClear = undefined
-  const onActiveChange = undefined
+/**
+ * The original interaction: she sounds the starting note, counts four beats,
+ * and begins; the singer comes in with her.
+ *
+ * Every prop has a default so this mounts in two quite different places. On its
+ * own page nothing is passed: baseUrl is empty, so the recordings load from
+ * /media/harmony, which that app's dev server serves itself — no backend at
+ * all. Inside the full console every prop is supplied, and it behaves exactly
+ * as the panel it replaces: armed by a spoken command, handing the microphone
+ * back and forth with speech recognition.
+ */
+export default function Leader({
+  baseUrl = '',
+  armed = null,
+  onClear,
+  onActiveChange,
+} = {}) {
   const [listening, setListening] = useState(false)
   const [mode, setMode] = useState('harmonize')
   const [parts, setParts] = useState(['alto'])
