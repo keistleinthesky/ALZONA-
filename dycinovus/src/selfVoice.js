@@ -54,6 +54,43 @@ export function followAudio(el) {
   return el
 }
 
+// Run something once she has stopped talking.
+//
+// Anything that makes a sound of its own has to wait for her to finish, or it
+// plays over the top of her: the harmony's reference note and count-in landed
+// underneath "Okay, sing Lupang Hinirang and I'll harmonize with you in alto".
+//
+// The cap is not optional. The speaking window is pushed forward by whoever is
+// making the sound, and a reply that dies without ever reporting it — a stalled
+// element, a tab that lost focus — would otherwise leave this waiting for the
+// end of a sentence that already finished. Late is recoverable; never is not.
+//
+// Returns a cancel function; call it if the caller goes away first.
+export function whenQuiet(run, { pollMs = 120, maxWaitMs = 15000 } = {}) {
+  const startedAt = performance.now()
+  let timer = null
+  let cancelled = false
+
+  const attempt = () => {
+    if (cancelled) return
+    if (hearingSelf() && performance.now() - startedAt < maxWaitMs) {
+      timer = setTimeout(attempt, pollMs)
+      return
+    }
+    run()
+  }
+
+  // Always through a timer, never straight away: a caller that starts audio
+  // synchronously would otherwise do it before the sound it is waiting on has
+  // had a chance to mark the window at all.
+  timer = setTimeout(attempt, pollMs)
+
+  return () => {
+    cancelled = true
+    if (timer) clearTimeout(timer)
+  }
+}
+
 // Tests only — forget that she ever spoke.
 export function resetSelfVoice() {
   quietUntil = 0

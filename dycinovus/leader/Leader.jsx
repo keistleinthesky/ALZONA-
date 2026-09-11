@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { detectPitch, hzFromMidi, midiFromHz, noteLabel } from '../src/pitch'
+import { hearingSelf, whenQuiet } from '../src/selfVoice'
 import HarmonyChart, { PART_COLORS } from './HarmonyChart'
 import {
   HarmonyPlayer,
@@ -27,6 +28,13 @@ import {
 // Stop singing for this long and the recording WAITS for you. Set above a
 // normal breath (~0.5s) so ordinary phrasing doesn't pause it, but low enough
 // that pausing feels immediate when you actually stop.
+// How often to check whether she has stopped talking, and how long to keep
+// checking. The cap matters: if a reply never reports finishing — a stalled
+// element, a tab that lost focus — the harmony must still start rather than
+// wait for ever on a sentence that already ended.
+const QUIET_POLL_MS = 120
+const QUIET_WAIT_MAX_MS = 15000
+
 const SILENCE_PAUSE = 1.2
 // Only after this much continuous silence do we call the take finished and
 // release the microphone.
@@ -430,16 +438,31 @@ export default function Leader({
    * before the component can mount.
    */
   useEffect(() => {
-    if (!autoStartRef.current) return
+    if (!autoStartRef.current) return undefined
     if (listening) {
       // teardown(), not stop(): in sing-back mode stop() reads the ending as
       // "I have finished singing, now imitate me", and a fresh command is not
       // that. This effect runs again once listening clears, and starts then.
       teardown()
-      return
+      return undefined
     }
-    autoStartRef.current = false
-    start()
+
+    // Wait for her to finish answering. A command is acknowledged out loud —
+    // "Okay, sing Lupang Hinirang and I'll harmonize with you in alto" — and
+    // starting the moment the directive arrives laid the reference note and
+    // the count-in straight over the top of that sentence.
+    //
+    // hearingSelf() is the same window everything else uses to know when she
+    // is the one making the sound, so this covers the spoken reply however it
+    // is produced: the backend's audio, or the browser's fallback voice.
+    // Say so, or the pause between her answer and the count-in reads as a
+    // panel that took the command and then did nothing with it.
+    if (hearingSelf()) setStatus('Starting when ALZONA finishes speaking…')
+
+    return whenQuiet(() => {
+      autoStartRef.current = false
+      start()
+    }, { pollMs: QUIET_POLL_MS, maxWaitMs: QUIET_WAIT_MAX_MS })
   }, [mode, parts, listening, start, teardown])
 
   const stop = useCallback(() => {
