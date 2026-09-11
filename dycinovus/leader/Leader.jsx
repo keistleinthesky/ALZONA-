@@ -110,6 +110,8 @@ export default function Leader({
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
 
+  // Set when a command arrives, cleared the moment it has been acted on.
+  const autoStartRef = useRef(false)
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
@@ -143,8 +145,12 @@ export default function Leader({
     setMode(armed.mode === 'harmonize' ? 'harmonize' : 'imitate')
     if (armed.parts?.length) setParts(armed.parts)
     else if (armed.part) setParts([armed.part])
+    // "harmonize me in alto" is already the instruction to begin. Arming the
+    // panel and then waiting for a button press asks for the same thing twice.
+    autoStartRef.current = true
     onClear?.()
   }, [armed, onClear])
+
 
   // Pull the manifest up front so the UI can show the tempo before playing.
   useEffect(() => {
@@ -410,6 +416,31 @@ export default function Leader({
       teardown()
     }
   }, [baseUrl, openMic, teardown])
+
+  /**
+   * Begin once a command's selection has actually been applied.
+   *
+   * Deliberately separate from the effect that handles `armed`. start() reads
+   * the parts through a ref, and that ref is only refreshed after the state has
+   * been committed — starting in the same effect would begin with whatever was
+   * selected BEFORE the command, the opposite of what was asked for.
+   *
+   * It also has to sit HERE, below start and teardown: a dependency array is
+   * evaluated during render, and naming a const declared further down throws
+   * before the component can mount.
+   */
+  useEffect(() => {
+    if (!autoStartRef.current) return
+    if (listening) {
+      // teardown(), not stop(): in sing-back mode stop() reads the ending as
+      // "I have finished singing, now imitate me", and a fresh command is not
+      // that. This effect runs again once listening clears, and starts then.
+      teardown()
+      return
+    }
+    autoStartRef.current = false
+    start()
+  }, [mode, parts, listening, start, teardown])
 
   const stop = useCallback(() => {
     const wasImitate = modeRef.current === 'imitate'

@@ -130,6 +130,14 @@ export default function VoiceRecorder({
         image_url: abs(data.image_url),
         video_url: abs(data.video_url),
         command: data.command,
+        // Forward these too. The backend answers a spoken or typed "harmonize
+        // me in alto" with a sing directive and "identify this coin" with the
+        // coin fields, and dropping them here meant the command was understood,
+        // answered out loud, and then quietly had no effect on the panel it was
+        // about. On the other console the singing panel has its own ear and
+        // received them by another route, which is what hid this.
+        sing: data.sing,
+        coin: data.coin,
       });
       // Reply is already on screen; fetch and play the voice when it's ready.
       if (data.reply) {
