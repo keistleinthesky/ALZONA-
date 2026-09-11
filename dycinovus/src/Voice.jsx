@@ -9,6 +9,18 @@ import { NAME, NAME_CJK } from "./wake";
 // text the way audio-to-Gemini transcription does. It's also free (no quota).
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 
+// Recognition failures are invisible from the outside: a denied microphone, a
+// network error and simply nobody speaking all look the same — nothing
+// happens. Every one of those has been mistaken for "she is ignoring me", so
+// the panel now records what it is doing where it can be read back.
+const trace = (baseUrl, line) => {
+  try {
+    const fd = new FormData();
+    fd.append("line", "VOICE " + line);
+    fetch(`${baseUrl}/debug_log`, { method: "POST", body: fd }).catch(() => {});
+  } catch { /* telemetry must never break the thing it watches */ }
+};
+
 // Greetings in CJK scripts (no \b word boundaries — they don't work for CJK).
 const GREET_CJK =
   "(?:こんにちは|こんばんは|おはよう(?:ございます)?|やあ|ねえ|ハロー|ハイ|" +
@@ -61,6 +73,10 @@ export default function VoiceRecorder({
   const [sending, setSending] = useState(false);
   const [awake, setAwake] = useState(false);
   const [srLang, setSrLang] = useState("en-US");
+  // Set when the browser refuses the microphone for THIS origin. Worth its
+  // own state because it is not a transient error: nothing will ever be
+  // heard until someone grants it, and the panel otherwise looks merely idle.
+  const [micBlocked, setMicBlocked] = useState(false);
 
   // Ref mirrors so speech-recognition callbacks always see current values.
   const awakeRef = useRef(false);
@@ -69,6 +85,7 @@ export default function VoiceRecorder({
   // seeing the old value and grab the microphone straight back.
   const suspendedRef = useRef(false);
   const srLangRef = useRef("en-US");
+  const lastPollTrace = useRef(0);
 
   const changeSrLang = (code) => {
     srLangRef.current = code;
@@ -127,7 +144,11 @@ export default function VoiceRecorder({
   };
 
   const startRecording = () => {
-    if (!SR || recording || busyRef.current || suspendedRef.current) return;
+    if (!SR || recording || busyRef.current || suspendedRef.current) {
+      trace(baseUrl, `blocked sr=${!!SR} rec=${recording} `
+        + `busy=${busyRef.current} suspended=${suspendedRef.current}`);
+      return;
+    }
     busyRef.current = true;
     const r = new SR();
     r.lang = srLangRef.current;   // user-selected recognition language
@@ -146,7 +167,11 @@ export default function VoiceRecorder({
       stopTimer = setTimeout(() => { try { r.stop(); } catch { /* already stopped */ } }, 1200);
     };
 
-    r.onstart = () => setRecording(true);
+    r.onstart = () => {
+      setRecording(true);
+      setMicBlocked(false);
+      trace(baseUrl, 'listening');
+    };
     r.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const seg = e.results[i];
@@ -160,7 +185,16 @@ export default function VoiceRecorder({
       }
       scheduleStop();          // any activity (even interim) extends the window
     };
-    r.onerror = () => {};      // e.g. "no-speech" — handled in onend
+    // "no-speech" is ordinary and handled in onend; "not-allowed" means the
+    // microphone was refused and nothing will ever work until that is fixed.
+    r.onerror = (e) => {
+      const err = e?.error || 'unknown';
+      trace(baseUrl, `error ${err}`);
+      // Permission is granted per ORIGIN — scheme, host AND port — so allowing
+      // the microphone on one console grants nothing to the other, which runs
+      // on a different port. That trips people up every time.
+      if (err === 'not-allowed' || err === 'service-not-allowed') setMicBlocked(true);
+    };
     r.onend = () => {
       clearTimeout(stopTimer);
       setRecording(false);
@@ -168,6 +202,8 @@ export default function VoiceRecorder({
       const heard = finals.join(" ").trim();
       // Best transcript first, then recognition alternatives as fallbacks.
       const candidates = heard ? [heard, ...alts] : alts;
+      trace(baseUrl, `heard=${JSON.stringify(heard)} `
+        + `alts=${JSON.stringify(alts.slice(0, 4))} awake=${awakeRef.current}`);
       if (!candidates.length) {
         finishBusy();          // silence -> do nothing (no hallucination)
         return;
@@ -299,14 +335,21 @@ export default function VoiceRecorder({
         const res = await fetch(`${baseUrl}/state`);
         if (!res.ok) return;
         const data = await res.json();
-        if (
+        const ready =
           data.face_state === "ALZONA" &&
           !recording &&
           !busyRef.current &&
           !suspendedRef.current &&
-          !hearingSelf(performance.now())
-        ) {
+          !hearingSelf(performance.now());
+        if (ready) {
           startRecording();
+        } else if (performance.now() - lastPollTrace.current > 5000) {
+          // Throttled: one line every 5s is enough to see which gate is shut,
+          // without burying the singing telemetry in the same log.
+          lastPollTrace.current = performance.now();
+          trace(baseUrl, `idle face=${data.face_state} rec=${recording} `
+            + `busy=${busyRef.current} suspended=${suspendedRef.current} `
+            + `self=${hearingSelf(performance.now())}`);
         }
       } catch {
         // silent
@@ -325,6 +368,12 @@ export default function VoiceRecorder({
         ) : recording ? (
           <span className="text-sm text-amber-400">
             Standby — greet ALZONA to activate
+          </span>
+        ) : micBlocked ? (
+          <span className="text-sm font-semibold text-rose-300">
+            Microphone blocked for this page — allow it from the icon in the
+            address bar. Permission is per port, so allowing it on another
+            console does not cover this one.
           </span>
         ) : (
           <span className="text-sm text-white/60">Microphone ready</span>
