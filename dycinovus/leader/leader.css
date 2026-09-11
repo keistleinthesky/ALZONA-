@@ -1,5 +1,11 @@
 @import "tailwindcss";
 
+/* Its components live here and one level up; see src/index.css for why
+ * this has to be said explicitly. */
+@source ".";
+@source "../src";
+
+
 html,
 body,
 #root {
