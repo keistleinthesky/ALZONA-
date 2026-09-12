@@ -110,6 +110,9 @@ export default function VoiceRecorder({
   const [micBlocked, setMicBlocked] = useState(false);
   // True when ANOTHER console currently holds the microphone.
   const [micTaken, setMicTaken] = useState(false);
+  // Something was heard clearly while she was asleep. Worth saying: from the
+  // outside, ignoring a question and failing to hear it look identical.
+  const [ignoredWhileAsleep, setIgnoredWhileAsleep] = useState("");
 
   // Ref mirrors so speech-recognition callbacks always see current values.
   const awakeRef = useRef(false);
@@ -148,6 +151,7 @@ export default function VoiceRecorder({
   const wakeUp = () => {
     awakeRef.current = true;
     setAwake(true);
+    setIgnoredWhileAsleep("");
   };
 
   const goToSleep = () => {
@@ -398,7 +402,17 @@ export default function VoiceRecorder({
 
       if (!awakeRef.current) {
         if (!wakeMatch) {
-          finishBusy();        // asleep + no greeting -> ignore completely
+          // Asleep and not addressed. She does nothing — but a visitor who
+          // just asked a full question deserves to know why nothing happened.
+          // Measured live: "What is the most famous festival in Croatia?" was
+          // transcribed perfectly three times and dropped three times, with
+          // the panel showing only "Microphone ready".
+          const words = heard.trim().split(/\s+/).filter(Boolean);
+          if (words.length >= 3) {
+            setIgnoredWhileAsleep(heard.trim());
+            trace(baseUrl, `asleep — ignored ${JSON.stringify(heard)}`);
+          }
+          finishBusy();
           return;
         }
         // Greeting + name heard -> ALZONA is awake until the stop phrase.
@@ -629,7 +643,7 @@ export default function VoiceRecorder({
           </span>
         ) : recording ? (
           <span className="text-sm text-amber-400">
-            Standby — greet ALZONA to activate
+            Standby — say “Alzona” to wake her
           </span>
         ) : micTaken ? (
           <span className="text-sm font-semibold text-amber-300">
@@ -659,6 +673,13 @@ export default function VoiceRecorder({
           ))}
         </select>
       </div>
+
+      {!awake && ignoredWhileAsleep && (
+        <p className="rounded-lg border border-amber-400/40 bg-amber-400/10 px-3 py-2 text-xs leading-relaxed text-amber-200">
+          Heard “{ignoredWhileAsleep}” — but she is in standby. Say{' '}
+          <b>“Alzona”</b> first, or put her name in the question.
+        </p>
+      )}
 
       <form onSubmit={handleTypedSubmit} className="flex items-center gap-2">
         <input
