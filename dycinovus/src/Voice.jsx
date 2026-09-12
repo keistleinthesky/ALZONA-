@@ -174,6 +174,9 @@ export default function VoiceRecorder({
     try {
       const fd = new FormData();
       fd.append("client", clientId.current);
+      // A focused window outranks an unfocused one, so switching tabs moves the
+      // microphone to the console being looked at.
+      fd.append("focused", document.hasFocus() ? "1" : "0");
       const r = await fetch(`${baseUrl}/mic_lease`, { method: "POST", body: fd });
       if (!r.ok) return true;          // no arbiter reachable — carry on alone
       const d = await r.json();
@@ -386,6 +389,18 @@ export default function VoiceRecorder({
     if (suspendedRef.current) releaseMic();   // the singing panel has the mic now
   }, [suspended]);
 
+  // Take the microphone the moment this window is focused, instead of waiting
+  // for the next poll — clicking a console should make it the one listening.
+  useEffect(() => {
+    const grab = () => { if (!suspendedRef.current) claimMic(); };
+    window.addEventListener("focus", grab);
+    document.addEventListener("visibilitychange", grab);
+    return () => {
+      window.removeEventListener("focus", grab);
+      document.removeEventListener("visibilitychange", grab);
+    };
+  }, []);
+
   useEffect(() => {
     if (!SR) return;
     const interval = setInterval(async () => {
@@ -407,6 +422,14 @@ export default function VoiceRecorder({
         // time it read as a broken microphone. The face was never what made
         // listening safe anyway; her NAME is. Nothing is acted on until she
         // hears it, so the camera has no say in whether she can hear at all.
+        // A hidden tab has no business holding the microphone: nobody is
+        // talking to a console they cannot see, and holding it there is what
+        // made the visible one look deaf.
+        if (document.visibilityState === "hidden") {
+          if (!recording) releaseMic();
+          return;
+        }
+
         const ready =
           !recording &&
           !busyRef.current &&

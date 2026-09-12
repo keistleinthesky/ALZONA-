@@ -2453,10 +2453,19 @@ _MIC_LEASE_TTL = 4.0        # a holder that stops renewing has gone away
 
 
 @app.post('/mic_lease')
-async def mic_lease(client: str = Form(...), release: str = Form("0")):
-    """Claim, renew or drop the right to listen. Returns who holds it."""
+async def mic_lease(client: str = Form(...), release: str = Form("0"),
+                    focused: str = Form("0")):
+    """Claim, renew or drop the right to listen. Returns who holds it.
+
+    A FOCUSED console takes the microphone from an unfocused one. Without that
+    the first page to load kept it for ever, and the answer to "this console
+    cannot hear me" was to go and close the other one — which is no answer at
+    all when both are wanted open. Whichever window someone is actually looking
+    at is the one they are talking to.
+    """
     now = time.time()
     lease = _MIC_LEASE
+    has_focus = focused in ("1", "true", "yes")
 
     if release in ("1", "true", "yes"):
         if lease["holder"] == client:
@@ -2464,7 +2473,9 @@ async def mic_lease(client: str = Form(...), release: str = Form("0")):
         return {"holder": lease["holder"], "yours": False}
 
     expired = now - lease["at"] > _MIC_LEASE_TTL
-    if lease["holder"] in (None, client) or expired:
+    # Only a focused claimant may take it from a live holder. An unfocused page
+    # must wait for the lease to lapse, or it would snatch it straight back.
+    if lease["holder"] in (None, client) or expired or has_focus:
         lease["holder"] = client
         lease["at"] = now
 
