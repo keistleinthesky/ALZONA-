@@ -15,9 +15,15 @@
 // a phrase both sides recognise. Keeping the name in one place is what stops
 // them drifting apart, which would strand the singing panel with no way back.
 
+// Every one of these came back from a real microphone. The vowel in the
+// middle is the one recognition cannot settle on — "Alzona", "Alzana",
+// "Alzena" — and a name it does not recognise leaves her asleep while the
+// person in front of her repeats themselves. Widening the vowel costs
+// nothing: a bare name only ever earns an introduction, never an action.
 // Name variants cover common speech-recognition mishearings of "Alzona",
 // including how Japanese/Korean/Chinese recognition writes the name.
-export const NAME = "(?:al\\s?zona|alsona|elzona|al\\s?sona|arizona|alona)"
+export const NAME =
+  "(?:al\\s?[zs][oae]na|el[zs][oa]na|arizona|alona|ol[zs]ona|az[oa]na)"
 export const NAME_CJK =
   "(?:アルゾナ|アルソナ|アルゾーナ|アルソーナ|알조나|알소나|알존아|阿尔佐纳|阿尔索纳|阿爾佐納|阿爾索納|奥佐娜)"
 

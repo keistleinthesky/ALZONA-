@@ -1818,10 +1818,31 @@ _BAYBAYIN_FILLER = {"hey", "hi", "hello", "heya", "yo", "okay", "ok", "po", "na"
                     "paki", "pakisulat", "isulat", "sulat", "salin", "isalin"}
 
 
+# How "Baybayin" actually comes back from speech recognition. Measured live:
+# "Can you translate Filipinas to be buying?" — the script's name is not in any
+# dictionary the recogniser has, so it reaches for English words that sound
+# like it. Matching only the correct spelling meant the feature worked when
+# typed and never when spoken.
+_BAYBAYIN_HEARD = re.compile(
+    r"\b(?:baybayin|baybayan|bay\s?bay(?:in|an)?|"
+    r"b(?:e|ee|y|ye|uy|ay)\s*buying|by\s*by(?:ing|in)|"
+    r"bay\s*bay|babayin|baibayin|bay\s?been|buy\s?buying)\b",
+    re.I,
+)
+
+
+def wants_baybayin(text):
+    """Did they ask for Baybayin, however the recogniser spelled it?"""
+    return bool(_BAYBAYIN_HEARD.search(text or ""))
+
+
 def extract_baybayin_target(text):
     t = text.lower()
     for sym in [",", ".", "?", "!", ":", '"', "'"]:
         t = t.replace(sym, "")
+    # Strip the ways the recogniser spells "Baybayin" too, or "be buying" ends
+    # up rendered as glyphs alongside the word that was actually asked for.
+    t = _BAYBAYIN_HEARD.sub(" ", t)
     stop = {"translate", "to", "in", "into", "the", "me", "show", "what", "is", "how",
             "do", "you", "write", "baybayin", "baybay", "please", "say", "word", "of",
             "a", "an", "can", "spell", "convert", "give", "see", "my", "name"}
@@ -2248,7 +2269,7 @@ def route_command(transcript):
             return {"mode": "coin", "reply": result.get("error", "I couldn't read that coin.")}
         return {"mode": "coin", "reply": result["spoken"], "coin": result["fields"]}
 
-    if "baybayin" in t or "baybay" in t:
+    if wants_baybayin(t):
         target = extract_baybayin_target(transcript)
         if target:
             url = make_baybayin_image(target)

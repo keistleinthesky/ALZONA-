@@ -38,8 +38,18 @@ wakes('Alzona.', true, 'LIVE')
 wakes('Elzona. Mama.', true, 'LIVE')
 wakes('Alzona. I.', true, 'LIVE')
 wakes('Arizona, Arizona. Arizona. Awesome.', true, 'LIVE')
+wakes('Alzana.', true, 'LIVE')
 wakes('Alsona', true)
 wakes('alona', true)
+
+// The vowel in the middle is the one recognition cannot settle on. Widening it
+// is cheap: a bare name only ever earns an introduction, never an action.
+console.log('\n--- the vowel it keeps getting wrong ---')
+wakes('Alzena', true)
+wakes('Alsana', true)
+wakes('Olzona', true)
+wakes('Azona', true)
+wakes('hi alzana', true)
 
 console.log('\n--- a greeting still works ---')
 wakes('Hi Alzona', true)
