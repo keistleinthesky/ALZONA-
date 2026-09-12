@@ -2638,14 +2638,97 @@ def video_feed():
     )
 
 
+# =========================================================
+# WHEN THE RECOGNISER'S FAVOURITE GUESS IS WRONG
+# =========================================================
+# Speech recognition returns several readings of the same audio and its top
+# choice is not always the right one. Measured live: "translate pilipinas to
+# baybayin" arrived as "Can you translate Filipinas to be buying?" — a word the
+# recogniser has never seen becomes whatever English it resembles.
+#
+# Only a COMMAND is worth second-guessing. A question is answered from whatever
+# was heard and the model copes with a stray word; a command either matches a
+# pattern or silently does nothing, and that is what a demo cannot afford.
+#
+# Nothing here runs a command — it only asks whether a reading LOOKS like one.
+# Executing each candidate to find out would print several Baybayin sheets.
+
+
+def _looks_like_command(text):
+    if not text:
+        return False
+    if detect_sing_command(text):
+        return True
+    if wants_baybayin(text):
+        return True
+    if identity_reply(text):
+        return True
+    t = text.lower()
+    if "coin" in t and any(w in t for w in ("identify", "what", "scan", "read", "check")):
+        return True
+    return False
+
+
+def _same_utterance(a, b):
+    """Are these two readings of the SAME audio?
+
+    Alternatives from the recogniser differ in a word or two, not wholesale. A
+    candidate sharing nothing with the top reading is not a rival reading of it,
+    and accepting one turns an innocent question into a command: "who is jose
+    rizal" became a harmonise instruction in testing because some unrelated
+    alternative happened to look like one. Requiring real overlap keeps the
+    second-guessing to what it is for.
+    """
+    wa = {w for w in re.findall(r"[a-z0-9]+", (a or "").lower()) if len(w) > 2}
+    wb = {w for w in re.findall(r"[a-z0-9]+", (b or "").lower()) if len(w) > 2}
+    if not wa or not wb:
+        return False
+    return len(wa & wb) / min(len(wa), len(wb)) >= 0.34
+
+
+def pick_command_text(primary, alts):
+    """The reading to act on: the top guess, unless a runner-up is a command."""
+    if _looks_like_command(primary):
+        return primary, False
+    for a in alts or []:
+        a = (a or "").strip()
+        if not a or a == primary:
+            continue
+        if _looks_like_command(a) and _same_utterance(primary, a):
+            return a, True
+    return primary, False
+
+
 @app.post('/command')
-async def command(text: str = Form(...), skip_tts: str = Form("")):
+async def command(text: str = Form(...), skip_tts: str = Form(""),
+                  alts: str = Form("")):
     """Text command (from the browser's speech recognition) -> route -> reply.
+
+    `alts` carries the recogniser's other readings of the same audio. They are
+    consulted only when the top reading is not a command — see
+    pick_command_text — so a command does not hinge on the recogniser's first
+    choice while a question is still answered from what was actually heard.
+
     With skip_tts=1 the reply text returns immediately and the frontend
     fetches the audio separately via /say (text shows while voice renders)."""
     text = (text or "").strip()
     if not text:
         return JSONResponse({"transcript": "", "reply": "", "error": "empty"})
+
+    others = []
+    if alts:
+        try:
+            parsed = json.loads(alts)
+            if isinstance(parsed, list):
+                others = [str(a) for a in parsed][:5]
+        except Exception:
+            others = []
+
+    chosen, from_alt = pick_command_text(text, others)
+    if from_alt:
+        print(f"command: heard {text!r}, acting on {chosen!r}")
+    text = chosen
+
     # Gemini calls block for seconds; threadpool keeps /video streaming.
     result = await run_in_threadpool(route_command, text)
     reply = result.get("reply", "")

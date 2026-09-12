@@ -62,13 +62,23 @@ const STOP_RE = new RegExp(
 
 // Speech-recognition languages the user can pick from (the Web Speech API
 // cannot auto-detect the spoken language — it needs to be told).
+// Philippine English first, and the default.
+//
+// en-US was the default, and it is the wrong model for this room: it renders
+// "Alzona" as "Alzana" and "Arizona", "Baybayin" as "be buying", and Filipino
+// place and person names as whatever English words they resemble. en-PH is
+// trained on exactly this accent and on Filipino proper nouns, and costs
+// nothing to switch to — Chrome ships both.
 const SR_LANGS = [
-  { code: "en-US", label: "English" },
+  { code: "en-PH", label: "English (PH)" },
+  { code: "en-US", label: "English (US)" },
   { code: "fil-PH", label: "Filipino" },
   { code: "ja-JP", label: "日本語" },
   { code: "ko-KR", label: "한국어" },
   { code: "zh-CN", label: "中文" },
 ];
+
+const DEFAULT_LANG = "en-PH";
 
 export default function VoiceRecorder({
   baseUrl = "http://localhost:5002",
@@ -84,7 +94,7 @@ export default function VoiceRecorder({
   const [typedText, setTypedText] = useState("");
   const [sending, setSending] = useState(false);
   const [awake, setAwake] = useState(false);
-  const [srLang, setSrLang] = useState("en-US");
+  const [srLang, setSrLang] = useState(DEFAULT_LANG);
   // Set when the browser refuses the microphone for THIS origin. Worth its
   // own state because it is not a transient error: nothing will ever be
   // heard until someone grants it, and the panel otherwise looks merely idle.
@@ -98,7 +108,7 @@ export default function VoiceRecorder({
   // closures created before a handover happens, and would otherwise keep
   // seeing the old value and grab the microphone straight back.
   const suspendedRef = useRef(false);
-  const srLangRef = useRef("en-US");
+  const srLangRef = useRef(DEFAULT_LANG);
   const lastPollTrace = useRef(0);
   // True when ALZONA spoke at any point during the CURRENT recognition session.
   // hearingSelf() only guards the moment recognition starts; if she begins
@@ -137,10 +147,18 @@ export default function VoiceRecorder({
     setTimeout(() => { busyRef.current = false; }, 800);    // cooldown after speaking
   };
 
-  const sendText = async (text) => {
+  const sendText = async (text, alternatives = []) => {
     try {
       const form = new FormData();
       form.append("text", text);
+      // Recognition returns several guesses and its favourite is not always the
+      // right one: "translate pilipinas to baybayin" came back as "...to be
+      // buying" with the correct reading further down the list. The backend
+      // tries these when the top guess is not a command it knows, so a demo
+      // does not hinge on the recogniser's first choice.
+      if (alternatives.length) {
+        form.append("alts", JSON.stringify(alternatives.slice(0, 5)));
+      }
       form.append("skip_tts", "1");   // text now, audio in parallel via /say
       const res = await fetch(`${baseUrl}/command`, { method: "POST", body: form });
       const data = await res.json();
@@ -303,7 +321,7 @@ export default function VoiceRecorder({
           .replace(/^[\s,.!?]+/, "")
           .trim();
         if (command) {
-          sendText(command);   // greeting + command in one breath
+          sendText(command, candidates);   // greeting + command in one breath
         } else {
           sayInAlzonaVoice("Hello! I'm listening. How can I help you?");
         }
@@ -319,7 +337,7 @@ export default function VoiceRecorder({
           .trim();
         if (rest) command = rest;
       }
-      sendText(command);
+      sendText(command, candidates);
     };
 
     recognitionRef.current = r;
