@@ -2432,6 +2432,45 @@ async def listen(file: UploadFile = File(...)):
         return {"kind": "none", "error": str(e)[:80]}
 
 
+# =========================================================
+# WHO HOLDS THE MICROPHONE
+# =========================================================
+# Two consoles can be open at once — 5173 where she follows the singer, 5174
+# where she leads — and each runs its own speech recognition. The browser gives
+# the microphone to ONE of them, so the other is aborted the moment it starts.
+# Measured live, they ping-ponged every two seconds and NEITHER ever heard a
+# word, with nothing on either screen to say why.
+#
+# They are different origins, so they cannot see each other through the browser:
+# no shared storage, no BroadcastChannel. The backend is the only thing they
+# both talk to, so the lease lives here.
+#
+# A lease with a deadline rather than a flag someone must remember to clear: a
+# page that is closed, reloaded or crashes never sends a release, and a flag
+# left set would lock every console out of the microphone for good.
+_MIC_LEASE = {"holder": None, "at": 0.0}
+_MIC_LEASE_TTL = 4.0        # a holder that stops renewing has gone away
+
+
+@app.post('/mic_lease')
+async def mic_lease(client: str = Form(...), release: str = Form("0")):
+    """Claim, renew or drop the right to listen. Returns who holds it."""
+    now = time.time()
+    lease = _MIC_LEASE
+
+    if release in ("1", "true", "yes"):
+        if lease["holder"] == client:
+            lease["holder"] = None
+        return {"holder": lease["holder"], "yours": False}
+
+    expired = now - lease["at"] > _MIC_LEASE_TTL
+    if lease["holder"] in (None, client) or expired:
+        lease["holder"] = client
+        lease["at"] = now
+
+    return {"holder": lease["holder"], "yours": lease["holder"] == client}
+
+
 @app.post('/debug_log')
 async def debug_log(line: str = Form(...)):
     """Take a diagnostic line from the browser and append it to a file.

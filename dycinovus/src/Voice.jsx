@@ -16,7 +16,10 @@ const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const trace = (baseUrl, line) => {
   try {
     const fd = new FormData();
-    fd.append("line", "VOICE " + line);
+    // Tag the page. Two consoles on two ports each run their own recognition,
+    // and the browser gives the microphone to one of them — without knowing
+    // which page a line came from, that fight is invisible in the log.
+    fd.append("line", "VOICE[" + location.port + "] " + line);
     fetch(`${baseUrl}/debug_log`, { method: "POST", body: fd }).catch(() => {});
   } catch { /* telemetry must never break the thing it watches */ }
 };
@@ -77,6 +80,8 @@ export default function VoiceRecorder({
   // own state because it is not a transient error: nothing will ever be
   // heard until someone grants it, and the panel otherwise looks merely idle.
   const [micBlocked, setMicBlocked] = useState(false);
+  // True when ANOTHER console currently holds the microphone.
+  const [micTaken, setMicTaken] = useState(false);
 
   // Ref mirrors so speech-recognition callbacks always see current values.
   const awakeRef = useRef(false);
@@ -86,6 +91,10 @@ export default function VoiceRecorder({
   const suspendedRef = useRef(false);
   const srLangRef = useRef("en-US");
   const lastPollTrace = useRef(0);
+  // Identifies this page to the lease. The port alone is not enough: two
+  // tabs on the SAME console would then look like one holder to each other.
+  const clientId = useRef(
+    `${location.port || "80"}-${Math.random().toString(36).slice(2, 8)}`);
 
   const changeSrLang = (code) => {
     srLangRef.current = code;
@@ -149,6 +158,29 @@ export default function VoiceRecorder({
       console.error("Command failed:", err);
       finishBusy();
     }
+  };
+
+  /** Ask the backend for the microphone. Renews the lease if we already hold it. */
+  const claimMic = async () => {
+    try {
+      const fd = new FormData();
+      fd.append("client", clientId.current);
+      const r = await fetch(`${baseUrl}/mic_lease`, { method: "POST", body: fd });
+      if (!r.ok) return true;          // no arbiter reachable — carry on alone
+      const d = await r.json();
+      return !!d.yours;
+    } catch {
+      return true;                      // never let the lease be what breaks listening
+    }
+  };
+
+  const releaseMic = () => {
+    try {
+      const fd = new FormData();
+      fd.append("client", clientId.current);
+      fd.append("release", "1");
+      fetch(`${baseUrl}/mic_lease`, { method: "POST", body: fd }).catch(() => {});
+    } catch { /* going away anyway */ }
   };
 
   const startRecording = () => {
@@ -336,10 +368,25 @@ export default function VoiceRecorder({
   };
 
   // Auto-listen when a face is present, but only when not busy.
+  // Release on the way out. Releasing after every TURN instead made the two
+  // consoles alternate: one finished, the other grabbed it mid-restart, and
+  // both kept aborting. Whoever is being spoken to should simply keep it.
+  useEffect(() => () => releaseMic(), []);
+
+  useEffect(() => {
+    if (suspendedRef.current) releaseMic();   // the singing panel has the mic now
+  }, [suspended]);
+
   useEffect(() => {
     if (!SR) return;
     const interval = setInterval(async () => {
       try {
+        // Renew while actually listening. The readiness test below requires
+        // NOT recording, so without this the holder stopped renewing exactly
+        // while it was using the microphone, the lease lapsed, and the other
+        // console took it mid-sentence.
+        if (recording || busyRef.current) { claimMic(); }
+
         const res = await fetch(`${baseUrl}/state`);
         if (!res.ok) return;
         const data = await res.json();
@@ -350,7 +397,15 @@ export default function VoiceRecorder({
           !suspendedRef.current &&
           !hearingSelf(performance.now());
         if (ready) {
-          startRecording();
+          // Only one console may listen at a time. Without this both start,
+          // the browser aborts one, and they take turns failing in silence.
+          const mine = await claimMic();
+          setMicTaken(!mine);
+          if (mine) startRecording();
+          else if (performance.now() - lastPollTrace.current > 5000) {
+            lastPollTrace.current = performance.now();
+            trace(baseUrl, 'standing down — another console holds the microphone');
+          }
         } else if (performance.now() - lastPollTrace.current > 5000) {
           // Throttled: one line every 5s is enough to see which gate is shut,
           // without burying the singing telemetry in the same log.
@@ -376,6 +431,11 @@ export default function VoiceRecorder({
         ) : recording ? (
           <span className="text-sm text-amber-400">
             Standby — greet ALZONA to activate
+          </span>
+        ) : micTaken ? (
+          <span className="text-sm font-semibold text-amber-300">
+            Another ALZONA console is using the microphone — close that tab to
+            talk to this one.
           </span>
         ) : micBlocked ? (
           <span className="text-sm font-semibold text-rose-300">
