@@ -2695,6 +2695,38 @@ def video_feed():
 # Executing each candidate to find out would print several Baybayin sheets.
 
 
+def transcribe_clip(data):
+    """What was actually said, according to Gemini. "" when it cannot tell.
+
+    The browser's recogniser has no Filipino vocabulary, even in its en-PH
+    model, so it forces Filipino audio onto the nearest English it knows and
+    reports itself certain: "baybayin" came back as "by buying", "into buying"
+    and "by Bayern", and the word to translate as Leslie, Guadalupe, Kishata.
+    Gemini has the vocabulary, and this is the same call /listen already makes.
+    """
+    if not data:
+        return ""
+    try:
+        r = gen_content(
+            model=CHAT_MODEL,
+            contents=[
+                types.Part.from_bytes(data=data, mime_type="audio/webm"),
+                "Transcribe this clip verbatim. The speaker is Filipino and may "
+                "mix English and Filipino in one sentence, and may name Filipino "
+                "words, places and people — including 'Baybayin', the pre-colonial "
+                "Philippine script, and 'ALZONA', the robot they are addressing. "
+                "Write exactly what was said, with no translation, no commentary "
+                "and no quotation marks. Reply with an empty string if there is "
+                "no speech.",
+            ],
+            config=GEN_CONFIG_FAST,
+        )
+        return " ".join((r.text or "").split()).strip().strip('"')
+    except Exception as e:
+        print("transcribe_clip failed:", str(e)[:120])
+        return ""
+
+
 def _looks_like_command(text):
     if not text:
         return False
@@ -2727,6 +2759,26 @@ def _same_utterance(a, b):
     return len(wa & wb) / min(len(wa), len(wb)) >= 0.34
 
 
+def _needs_second_opinion(text):
+    """Is the browser's reading worth checking against Gemini?
+
+    Not a command at all — yes, obviously.
+
+    A BAYBAYIN command — also yes, even though the intent was recognised. The
+    word is free-form and cannot be checked against anything, and it is the
+    entire point of the request: "Can you translate Leslie to by buying?" is
+    recognised as a Baybayin request and would confidently print LESLIE. Getting
+    the intent right while getting the word wrong is the failure that wastes
+    paper and puts the wrong thing in a visitor's hand.
+
+    A sing or coin command — no. Their content is a fixed vocabulary the browser
+    either matched or did not, so a second reading has nothing to add.
+    """
+    if not _looks_like_command(text):
+        return True
+    return bool(wants_baybayin(text))
+
+
 def pick_command_text(primary, alts):
     """The reading to act on: the top guess, unless a runner-up is a command."""
     if _looks_like_command(primary):
@@ -2742,7 +2794,7 @@ def pick_command_text(primary, alts):
 
 @app.post('/command')
 async def command(text: str = Form(...), skip_tts: str = Form(""),
-                  alts: str = Form("")):
+                  alts: str = Form(""), audio: UploadFile = File(None)):
     """Text command (from the browser's speech recognition) -> route -> reply.
 
     `alts` carries the recogniser's other readings of the same audio. They are
@@ -2769,6 +2821,15 @@ async def command(text: str = Form(...), skip_tts: str = Form(""),
     if from_alt:
         print(f"command: heard {text!r}, acting on {chosen!r}")
     text = chosen
+
+    # The browser got a command out of it — usually no second opinion needed,
+    # and no reason to spend a Gemini call or the second it costs.
+    if audio is not None and _needs_second_opinion(text):
+        clip = await audio.read()
+        better = await run_in_threadpool(transcribe_clip, clip)
+        if better and better.lower() != text.lower():
+            print(f"command: browser heard {text!r}, Gemini heard {better!r}")
+            text = better
 
     # Gemini calls block for seconds; threadpool keeps /video streaming.
     result = await run_in_threadpool(route_command, text)

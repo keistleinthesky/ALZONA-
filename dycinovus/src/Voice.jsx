@@ -121,6 +121,14 @@ export default function VoiceRecorder({
   // talking while it is already running, the open session transcribes her and
   // hands her own answer back as though a visitor had said it.
   const spokeDuringRef = useRef(false);
+  // The audio of the current utterance, kept so a bad reading can be checked
+  // against Gemini. Null when recording is not possible on this machine.
+  const clipRef = useRef(null);
+  const clipStreamRef = useRef(null);
+  // Set if recording ever costs us the recogniser. They are documented in
+  // wake.js as fighting over the microphone on this hardware; if that happens
+  // the recording is abandoned rather than breaking the thing it assists.
+  const clipUnsafeRef = useRef(false);
   // Identifies this page to the lease. The port alone is not enough: two
   // tabs on the SAME console would then look like one holder to each other.
   const clientId = useRef(
@@ -153,10 +161,13 @@ export default function VoiceRecorder({
     setTimeout(() => { busyRef.current = false; }, 800);    // cooldown after speaking
   };
 
-  const sendText = async (text, alternatives = []) => {
+  const sendText = async (text, alternatives = [], clip = null) => {
     try {
       const form = new FormData();
       form.append("text", text);
+      // The audio, for the backend to fall back on when this text is not a
+      // command it recognises. It decides; sending it costs nothing until then.
+      if (clip) form.append("audio", clip, "utterance.webm");
       // Recognition returns several guesses and its favourite is not always the
       // right one: "translate pilipinas to baybayin" came back as "...to be
       // buying" with the correct reading further down the list. The backend
@@ -224,6 +235,56 @@ export default function VoiceRecorder({
     } catch { /* going away anyway */ }
   };
 
+  /**
+   * Record the same utterance the recogniser is hearing.
+   *
+   * Only ever used when the browser's reading turns out not to be a command —
+   * see the backend — so the usual path costs nothing but the recording itself.
+   *
+   * Deliberately forgiving: on this hardware SpeechRecognition and a
+   * getUserMedia capture have been seen to take the microphone from each other.
+   * If that happens the recording is dropped for the rest of the session and
+   * the recogniser is left alone. A worse transcript is survivable; losing the
+   * microphone entirely is not.
+   */
+  const startClip = async () => {
+    if (clipUnsafeRef.current || clipRef.current) return;
+    if (typeof MediaRecorder === "undefined") return;
+    try {
+      const stream = clipStreamRef.current
+        || await navigator.mediaDevices.getUserMedia({ audio: true });
+      clipStreamRef.current = stream;
+      const rec = new MediaRecorder(stream);
+      const chunks = [];
+      rec.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data); };
+      rec.onerror = () => { clipUnsafeRef.current = true; };
+      rec.start();
+      clipRef.current = { rec, chunks };
+    } catch (e) {
+      clipUnsafeRef.current = true;
+      trace(baseUrl, `clip recording unavailable (${e?.name || "error"}) — `
+        + `browser transcript only`);
+    }
+  };
+
+  /** The utterance just recorded, or null. Always stops the recorder. */
+  const takeClip = async () => {
+    const held = clipRef.current;
+    clipRef.current = null;
+    if (!held) return null;
+    const { rec, chunks } = held;
+    if (rec.state === "inactive") return null;
+    await new Promise((done) => {
+      rec.onstop = done;
+      try { rec.stop(); } catch { done(); }
+    });
+    if (!chunks.length) return null;
+    const blob = new Blob(chunks, { type: chunks[0].type || "audio/webm" });
+    // Too short to carry a sentence; sending it would spend a Gemini call on
+    // a click or a breath.
+    return blob.size > 2000 ? blob : null;
+  };
+
   const startRecording = () => {
     if (!SR || recording || busyRef.current || suspendedRef.current) {
       trace(baseUrl, `blocked sr=${!!SR} rec=${recording} `
@@ -254,6 +315,7 @@ export default function VoiceRecorder({
       setRecording(true);
       setMicBlocked(false);
       trace(baseUrl, 'listening');
+      startClip();
     };
     r.onresult = (e) => {
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -308,6 +370,7 @@ export default function VoiceRecorder({
         + `alts=${alts.length} conf=${confidence === null ? '?' : confidence.toFixed(2)} `
         + `lang=${srLangRef.current} awake=${awakeRef.current}`);
       if (!candidates.length) {
+        takeClip();            // stop the recorder; nothing to check
         finishBusy();          // silence -> do nothing (no hallucination)
         return;
       }
@@ -339,7 +402,7 @@ export default function VoiceRecorder({
           .replace(/^[\s,.!?]+/, "")
           .trim();
         if (command) {
-          sendText(command, candidates);   // greeting + command in one breath
+          takeClip().then((clip) => sendText(command, candidates, clip));
         } else {
           sayInAlzonaVoice("Hello! I'm listening. How can I help you?");
         }
@@ -374,7 +437,7 @@ export default function VoiceRecorder({
           .trim();
         if (rest) command = rest;
       }
-      sendText(command, candidates);
+      takeClip().then((clip) => sendText(command, candidates, clip));
     };
 
     recognitionRef.current = r;
