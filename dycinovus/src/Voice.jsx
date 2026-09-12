@@ -30,14 +30,23 @@ const GREET_CJK =
   "안녕하세요|안녕|여보세요|" +
   "你好|您好|哈喽|哈囉|嗨|早上好|下午好|晚上好)";
 
-// Wake phrase: ANY greeting followed by ALZONA's name, e.g. "Hi Alzona",
-// "Kumusta Alzona", "こんにちは アルゾナ", "안녕 알조나", "你好 阿尔佐纳".
-// Once heard, she accepts ALL voice input until the stop phrase.
+// Wake phrase: her NAME, with or without a greeting in front of it.
+//
+// The greeting used to be required — "Hi Alzona" woke her, "Alzona" did not.
+// That is not how anyone calls someone by name, and the telemetry showed it
+// costing every attempt: she transcribed "Alzona. I.", "Elzona. Mama.",
+// "Arizona, Arizona." perfectly and ignored all of them for want of a "hi".
+// Calling a robot by her name IS the greeting.
+//
+// A bare name is deliberately enough to wake her but never enough to be taken
+// as a command: with nothing after it she answers and waits, so the cost of a
+// stray "Arizona" in conversation is one "Hello, I'm listening", not an action.
 const WAKE_RE = new RegExp(
-  "\\b(?:hey|hi|hello|heya|yo|greetings|kumusta|kamusta|mabuhay|" +
+  "\\b(?:(?:hey|hi|hello|heya|yo|greetings|kumusta|kamusta|mabuhay|" +
   "good\\s+(?:morning|afternoon|evening|day)|" +
-  "magandang\\s+(?:umaga|hapon|gabi|araw)|okay|ok)[ ,!.]*" + NAME + "\\b" +
-  "|" + GREET_CJK + "[、。，,!！?？・\\s]*" + NAME_CJK,
+  "magandang\\s+(?:umaga|hapon|gabi|araw)|okay|ok)[ ,!.]*)?" + NAME + "\\b" +
+  "|" + GREET_CJK + "[、。，,!！?？・\\s]*" + NAME_CJK +
+  "|" + NAME_CJK,
   "i"
 );
 
