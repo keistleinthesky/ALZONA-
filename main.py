@@ -1274,60 +1274,48 @@ CROATIAN_DANCES = {
         "text": "Linđo is the lively couples' dance of Dubrovnik and the "
                 "Konavle region, led by a fiddler playing the three-stringed "
                 "lijerica.",
-        "video": "",
+        "video": "videos/LINDO.mp4",
+        "start": 0,
     },
     "nijemo kolo": {
-        "aliases": ("nijemo", "silent circle dance", "silent kolo"),
+        "aliases": ("nijemo", "silent circle dance", "silent kolo",
+                    "silent dance"),
         "text": "Nijemo Kolo is the silent circle dance of the Dalmatian "
                 "hinterland, danced with no music at all — only the dancers' "
-                "steps and the jingle of their ornaments — and UNESCO lists it "
-                "as intangible cultural heritage.",
-        "video": "",
+                "steps — and UNESCO lists it as intangible cultural heritage.",
+        "video": "videos/NIJEMO_KOLO.mp4",
+        "start": 0,
     },
     "drmeš": {
         "aliases": ("drmes", "drmesh"),
         "text": "Drmeš is a fast shaking dance from northern Croatia, danced "
                 "in small tight circles or pairs with a trembling step that "
                 "gives it its name.",
-        "video": "",
+        "video": "videos/DRMES.mp4",
+        "start": 0,
     },
-    "međimurje": {
-        "aliases": ("medimurje", "medjimurje", "medimurski"),
-        "text": "The dances of Međimurje in Croatia's far north are gentler "
-                "and more song-led than the rest, and often accompany the "
-                "region's celebrated folk singing.",
-        "video": "",
+    "lado": {
+        "aliases": ("lado ensemble", "national folk dance ensemble",
+                    "croatian national ensemble"),
+        "text": "LADO is Croatia's national folk dance ensemble, founded in "
+                "1949 to perform the dances and songs of every Croatian region "
+                "in their authentic costumes.",
+        "video": "videos/LADO.mp4",
+        "start": 0,
     },
-    "konavle": {
-        "aliases": ("konavoski", "konavle dance"),
-        "text": "The dances of Konavle, south of Dubrovnik, are performed in "
-                "the region's distinctive embroidered costume and share the "
-                "lijerica accompaniment of neighbouring Linđo.",
-        "video": "",
-    },
-    "vrlika kolo": {
-        "aliases": ("vrlicko kolo", "vrličko kolo", "vrlika"),
-        "text": "The Vrlika Kolo is a circle dance from the Dalmatian town of "
-                "Vrlika, danced in a closed ring to the dancers' own steps "
-                "rather than to instruments.",
-        "video": "",
-    },
-    "slavonian": {
-        "aliases": ("slavonia", "slavonski", "slavonske"),
-        "text": "The dances of Slavonia in eastern Croatia are bright circle "
-                "and couple dances, usually led by the tamburica, the region's "
-                "plucked string band.",
-        "video": "",
-    },
-    "moreška": {
-        "aliases": ("moreska", "moresca", "korcula sword dance",
-                    "korčula sword dance", "sword dance"),
-        "text": "The Moreška of Korčula is a sword dance staged as a battle "
-                "between two kings over a captured princess, performed on the "
-                "island for more than four centuries.",
-        "video": "",
+    "gorski kotar": {
+        "aliases": ("gorski", "kotar"),
+        "text": "The dances of Gorski Kotar come from Croatia's forested "
+                "highlands between Zagreb and the sea, a region whose mountain "
+                "villages kept their own steps and songs.",
+        "video": "videos/GORSKI_KOTAR.mp4",
+        "start": 0,
     },
 }
+
+
+# Which dance to show next when none is named.
+_croatian_turn = 0
 
 
 def _croatian_dance(text):
@@ -2415,6 +2403,17 @@ def route_command(transcript):
     found = _croatian_dance(t)
     if found:
         return _croatian_dance_reply(*found)
+
+    # "show me a Croatian dance" — no dance named, so she picks one. Rotating
+    # rather than random: a visitor who asks twice should not be shown the same
+    # dance twice, and a demo run repeatedly should not look like it knows one.
+    if ("croatia" in t or "croatian" in t) and any(
+            w in t for w in ("dance", "dances", "folk", "sayaw")):
+        global _croatian_turn
+        names = list(CROATIAN_DANCES)
+        name = names[_croatian_turn % len(names)]
+        _croatian_turn += 1
+        return _croatian_dance_reply(name, CROATIAN_DANCES[name])
 
     for name, path in DANCES.items():
         if name in t:
