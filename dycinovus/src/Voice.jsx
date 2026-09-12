@@ -80,6 +80,12 @@ const SR_LANGS = [
 
 const DEFAULT_LANG = "en-PH";
 
+// How sure the recogniser must be before she acts on what it returned.
+// Chrome reports this per segment; where it reports nothing the transcript
+// is taken at face value, since refusing everything would be worse than
+// occasionally answering a bad guess.
+const MIN_COMMAND_CONFIDENCE = 0.55;
+
 export default function VoiceRecorder({
   baseUrl = "http://localhost:5002",
   onResult = () => {},
@@ -234,6 +240,7 @@ export default function VoiceRecorder({
     spokeDuringRef.current = false;   // fresh session, she has not spoken in it
     let finals = [];           // best transcript of each finished segment
     let alts = [];             // every alternative heard (checked for wake/stop phrases)
+    let confs = [];            // how sure the recogniser was about each segment
     let stopTimer = null;
 
     // Stop ~1.2s after the last recognition activity, so slow or soft
@@ -253,7 +260,14 @@ export default function VoiceRecorder({
         const seg = e.results[i];
         if (!seg.isFinal) continue;
         const best = (seg[0].transcript || "").trim();
-        if (best) finals.push(best);
+        if (best) {
+          finals.push(best);
+          // Chrome reports 0 for confidence on some builds; only real numbers
+          // are worth keeping, or every segment would look hopeless.
+          if (typeof seg[0].confidence === "number" && seg[0].confidence > 0) {
+            confs.push(seg[0].confidence);
+          }
+        }
         for (let j = 0; j < seg.length; j++) {
           const t = (seg[j].transcript || "").trim();
           if (t) alts.push(t);
@@ -287,8 +301,12 @@ export default function VoiceRecorder({
       const heard = finals.join(" ").trim();
       // Best transcript first, then recognition alternatives as fallbacks.
       const candidates = heard ? [heard, ...alts] : alts;
+      const confidence = confs.length
+        ? confs.reduce((a, b) => a + b, 0) / confs.length
+        : null;
       trace(baseUrl, `heard=${JSON.stringify(heard)} `
-        + `alts=${JSON.stringify(alts.slice(0, 4))} awake=${awakeRef.current}`);
+        + `alts=${alts.length} conf=${confidence === null ? '?' : confidence.toFixed(2)} `
+        + `lang=${srLangRef.current} awake=${awakeRef.current}`);
       if (!candidates.length) {
         finishBusy();          // silence -> do nothing (no hallucination)
         return;
@@ -325,6 +343,25 @@ export default function VoiceRecorder({
         } else {
           sayInAlzonaVoice("Hello! I'm listening. How can I help you?");
         }
+        return;
+      }
+
+      // Awake, but the recogniser is guessing.
+      //
+      // Once awake, every transcript is treated as something to answer — so a
+      // bad guess is not merely ignored, it is answered out loud, and her reply
+      // keeps her talking while the next bad guess arrives. Live, that produced
+      // "Hello Bucking.", "Send the mic, mum." and "Alzheimer's." in a row, each
+      // dutifully replied to.
+      //
+      // Below this the audio did not carry. Saying nothing is the honest
+      // response to something that was not understood; a wake phrase still gets
+      // through above, because recognising her name is a lower bar than
+      // transcribing a sentence.
+      if (confidence !== null && confidence < MIN_COMMAND_CONFIDENCE) {
+        trace(baseUrl, `ignored — only ${confidence.toFixed(2)} sure of `
+          + `${JSON.stringify(heard)}`);
+        finishBusy();
         return;
       }
 
