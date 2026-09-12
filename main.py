@@ -1806,6 +1806,18 @@ def make_baybayin_image(word):
     return f"/gen/{fn}"
 
 
+# Ways her name comes back from speech recognition. Addressing her is not part
+# of the word to write: "Alzona, translate pilipinas to baybayin" was rendering
+# "alzona pilipinas" in glyphs, which is a different word and a wasted sheet of
+# paper once it prints.
+_BAYBAYIN_ADDRESS = {"alzona", "alsona", "elzona", "arizona", "alona", "al", "zona"}
+
+# Greetings and politeness that can sit around the request without being in it.
+_BAYBAYIN_FILLER = {"hey", "hi", "hello", "heya", "yo", "okay", "ok", "po", "na",
+                    "ako", "mo", "ng", "ang", "sa", "para", "pwede", "puwede",
+                    "paki", "pakisulat", "isulat", "sulat", "salin", "isalin"}
+
+
 def extract_baybayin_target(text):
     t = text.lower()
     for sym in [",", ".", "?", "!", ":", '"', "'"]:
@@ -1813,7 +1825,15 @@ def extract_baybayin_target(text):
     stop = {"translate", "to", "in", "into", "the", "me", "show", "what", "is", "how",
             "do", "you", "write", "baybayin", "baybay", "please", "say", "word", "of",
             "a", "an", "can", "spell", "convert", "give", "see", "my", "name"}
-    return " ".join(w for w in t.split() if w not in stop).strip()
+    stop = stop | _BAYBAYIN_ADDRESS | _BAYBAYIN_FILLER
+
+    words = [w for w in t.split() if w not in stop]
+
+    # Everything was addressing or politeness — there is no word to write. Keep
+    # the name rather than print a blank sheet, so the caller can ask which word.
+    if not words:
+        return ""
+    return " ".join(words).strip()
 
 
 # =========================================================
