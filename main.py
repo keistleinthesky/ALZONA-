@@ -1711,6 +1711,20 @@ _AUTOPRINT = os.environ.get("BAYBAYIN_AUTOPRINT", "1").strip().lower() not in (
     "0", "false", "no", "off")
 _PRINTER = os.environ.get("BAYBAYIN_PRINTER", "").strip()   # blank = Windows default
 
+# The GOOJPRT PT-210 the robot carries. It is preferred over a desk printer
+# when present, and simply absent otherwise — see thermal.py for why it needs
+# no driver. BAYBAYIN_THERMAL=0 in .env forces the desk printer instead.
+try:
+    import thermal
+    _THERMAL_AVAILABLE = True
+except Exception as _e:
+    thermal = None
+    _THERMAL_AVAILABLE = False
+    print("Thermal printing unavailable:", _e)
+
+_THERMAL_FIRST = os.environ.get("BAYBAYIN_THERMAL", "1").strip().lower() not in (
+    "0", "false", "no", "off")
+
 # What the last print attempt did, surfaced on /state so the UI can show it.
 last_print_status = {"word": None, "ok": None, "detail": "", "time": 0}
 
@@ -1751,16 +1765,39 @@ def _print_image_sync(path, printer_name):
         hDC.DeleteDC()
 
 
-def print_image(path, label=""):
+def print_image(path, label="", glyphs=None):
     """Send an image to the printer, off the request thread so a busy or offline
-    printer never stalls ALZONA's reply. Uses the Windows default printer unless
-    BAYBAYIN_PRINTER names another one."""
-    if not _PRINTING_AVAILABLE:
-        print("Print skipped — Windows printing modules unavailable.")
-        return
+    printer never stalls ALZONA's reply.
+
+    The thermal printer is tried first whenever it is plugged in: it is the one
+    the robot carries, it needs no driver, and it prints a strip a visitor can
+    take away rather than a sheet of A4. Anything else falls back to the
+    Windows default printer, or BAYBAYIN_PRINTER if that names one."""
 
     def _job():
         global last_print_status
+
+        # ---- the thermal printer, if it is there ----
+        if _THERMAL_AVAILABLE and _THERMAL_FIRST:
+            ok, detail = thermal.print_image(path, label=label, glyphs=glyphs)
+            if ok:
+                last_print_status = {"word": label, "ok": True,
+                                     "detail": f"thermal — {detail}",
+                                     "time": time.time()}
+                print(f"Baybayin printed on the thermal printer: {label}")
+                return
+            # Not plugged in is the ordinary case, not an error worth failing
+            # on — fall through to whatever else is available.
+            print("Thermal printer unavailable:", detail)
+
+        # ---- anything else Windows knows about ----
+        if not _PRINTING_AVAILABLE:
+            last_print_status = {"word": label, "ok": False,
+                                 "detail": "no printer available",
+                                 "time": time.time()}
+            print("Print skipped — no thermal printer and no Windows printing.")
+            return
+
         printer = _PRINTER or win32print.GetDefaultPrinter()
         try:
             _print_image_sync(path, printer)
@@ -1776,6 +1813,9 @@ def print_image(path, label=""):
 
 def make_baybayin_image(word):
     images, H, sp = [], 300, 50
+    # Kept alongside the composed sheet: the thermal printer lays the word out
+    # itself, from the glyphs, rather than shrinking a sheet drawn for A4.
+    glyphs = []
     for s in split_syllables(word):
         ap = _bay_path(s)
         if not ap or not os.path.exists(ap):
@@ -1783,6 +1823,7 @@ def make_baybayin_image(word):
         img = cv2.imread(ap)
         if img is None:
             continue
+        glyphs.append((ap, s.upper()))
         images.append(cv2.resize(img, (int(img.shape[1] * H / img.shape[0]), H)))
     if not images:
         return None
@@ -1802,7 +1843,7 @@ def make_baybayin_image(word):
     # Auto-print the sheet as soon as it is generated (set BAYBAYIN_AUTOPRINT=0
     # in .env to keep the on-screen display without using paper).
     if _AUTOPRINT:
-        print_image(out_path, label=word)
+        print_image(out_path, label=word, glyphs=glyphs)
     return f"/gen/{fn}"
 
 
