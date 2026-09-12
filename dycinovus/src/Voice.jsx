@@ -100,6 +100,11 @@ export default function VoiceRecorder({
   const suspendedRef = useRef(false);
   const srLangRef = useRef("en-US");
   const lastPollTrace = useRef(0);
+  // True when ALZONA spoke at any point during the CURRENT recognition session.
+  // hearingSelf() only guards the moment recognition starts; if she begins
+  // talking while it is already running, the open session transcribes her and
+  // hands her own answer back as though a visitor had said it.
+  const spokeDuringRef = useRef(false);
   // Identifies this page to the lease. The port alone is not enough: two
   // tabs on the SAME console would then look like one holder to each other.
   const clientId = useRef(
@@ -208,6 +213,7 @@ export default function VoiceRecorder({
     r.maxAlternatives = 5;     // quiet audio often has the wake phrase in a lower-ranked guess
     r.continuous = true;       // don't cut off at the first brief pause
 
+    spokeDuringRef.current = false;   // fresh session, she has not spoken in it
     let finals = [];           // best transcript of each finished segment
     let alts = [];             // every alternative heard (checked for wake/stop phrases)
     let stopTimer = null;
@@ -250,6 +256,15 @@ export default function VoiceRecorder({
     r.onend = () => {
       clearTimeout(stopTimer);
       setRecording(false);
+
+      if (spokeDuringRef.current) {
+        // She talked over this session. Whatever was captured is her own reply
+        // coming back through the speakers — acting on it starts a loop where
+        // she answers herself.
+        trace(baseUrl, "discarded — ALZONA was speaking during this session");
+        finishBusy();
+        return;
+      }
 
       const heard = finals.join(" ").trim();
       // Best transcript first, then recognition alternatives as fallbacks.
@@ -332,6 +347,9 @@ export default function VoiceRecorder({
   // Speak a short phrase in ALZONA's own voice (backend /say). Falls back to
   // the browser voice only if the backend can't synthesize (e.g. TTS quota).
   const sayInAlzonaVoice = async (text) => {
+    // Anything the microphone picks up from here until this recognition
+    // session ends is hers, not a visitor's.
+    spokeDuringRef.current = true;
     try {
       const form = new FormData();
       form.append("text", text);

@@ -1030,6 +1030,58 @@ def face_detection():
     webcam.release()
 # =========================================================
 # GLOBAL RESET DETECTION
+# =========================================================
+# BEING ADDRESSED BY NAME
+# =========================================================
+# Called by name with nothing else, she used to hand "alzona" to the knowledge
+# model, which answered the only way it could — as a question about a word:
+#
+#   "Alzona is a surname predominantly found in the Philippines, with possible
+#    Italian or Spanish origins."
+#
+# Being addressed is not being asked a trivia question. She introduces herself
+# instead, and the answer is fixed rather than generated: who she is is not
+# something to be improvised differently every time she is greeted.
+
+_NAME_ONLY = re.compile(
+    r"^[\s,.!?]*(?:(?:hey|hi|hello|heya|yo|good\s+(?:morning|afternoon|evening)|"
+    r"kumusta|kamusta|magandang\s+\w+|okay|ok|uy|oy)[\s,.!?]*)*"
+    r"(?:al\s?zona|alsona|elzona|al\s?sona|arizona|alona)"
+    r"[\s,.!?]*(?:po)?[\s,.!?]*$",
+    re.I,
+)
+
+# "who are you", "what is alzona", "anong alzona", "sino ka"
+_WHO_ARE_YOU = re.compile(
+    r"\b(?:who\s+(?:are|r)\s+(?:you|u)|what(?:'s|\s+is)\s+(?:your\s+name|alzona)|"
+    r"introduce\s+yourself|tell\s+me\s+about\s+yourself|"
+    r"sino\s+ka|ano\s+(?:ang\s+)?(?:pangalan\s+mo|alzona))\b",
+    re.I,
+)
+
+_IDENTITY = (
+    "I'm ALZONA, your AI companion — Android for Learners as Zone and Oasis "
+    "of National Archives. Ask me about Philippine or Croatian history, or "
+    "sing Lupang Hinirang and I'll harmonise with you."
+)
+
+_GREETED = (
+    "I'm ALZONA, your AI companion. How can I help you?"
+)
+
+
+def identity_reply(text):
+    """Answer to her own name. Returns None when the text is a real question."""
+    t = (text or "").strip()
+    if not t:
+        return None
+    if _WHO_ARE_YOU.search(t):
+        return _IDENTITY
+    if _NAME_ONLY.match(t):
+        return _GREETED
+    return None
+
+
 def detect_reset_command(text):
 
     t = text.lower().strip()
@@ -2084,6 +2136,12 @@ def detect_memory_reset(text):
 def route_command(transcript):
     """Dispatch a spoken command to arduino / video / baybayin / chat."""
     t = transcript.lower()
+
+    # Answer to her own name before anything else looks at the text. Left to
+    # the knowledge model, "alzona" came back as an answer about the surname.
+    said_hello = identity_reply(transcript)
+    if said_hello:
+        return {"mode": "chat", "reply": said_hello}
 
     # Clear short-term memory on "new conversation" / "goodbye" so the next
     # visitor starts fresh. Acknowledge in the speaker's language.
