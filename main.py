@@ -1055,9 +1055,22 @@ _NAME_ONLY = re.compile(
 _WHO_ARE_YOU = re.compile(
     r"\b(?:who\s+(?:are|r)\s+(?:you|u)|what(?:'s|\s+is)\s+(?:your\s+name|alzona)|"
     r"introduce\s+yourself|tell\s+me\s+about\s+yourself|"
-    r"sino\s+ka|ano\s+(?:ang\s+)?(?:pangalan\s+mo|alzona))\b",
+    r"sino\s+ka|ano\s+(?:ang\s+)?(?:pangalan\s+mo|alzona)|"
+    # Croatian: "who are you", "what is your name", "introduce yourself"
+    r"tko\s+si(?:\s+ti)?|kako\s+se\s+zove[sš]|predstavi\s+se|"
+    r"[sš]to\s+je\s+alzona)\b",
     re.I,
 )
+
+# Her introduction in Croatian. Fixed, like the English one: who she is should
+# not be improvised, least of all in a language the team cannot proofread live.
+_IDENTITY_HR = (
+    "Ja sam ALZONA, tvoja AI pratiteljica — Android for Learners as Zone and "
+    "Oasis of National Archives. Pitaj me o filipinskoj ili hrvatskoj "
+    "povijesti, ili zapjevaj i otpjevat ću drugi glas s tobom."
+)
+
+_GREETED_HR = "Ja sam ALZONA, tvoja AI pratiteljica. Kako ti mogu pomoći?"
 
 _IDENTITY = (
     "I'm ALZONA, your AI companion — Android for Learners as Zone and Oasis "
@@ -1075,10 +1088,11 @@ def identity_reply(text):
     t = (text or "").strip()
     if not t:
         return None
+    croatian = detect_reply_language(t) == "Croatian"
     if _WHO_ARE_YOU.search(t):
-        return _IDENTITY
+        return _IDENTITY_HR if croatian else _IDENTITY
     if _NAME_ONLY.match(t):
-        return _GREETED
+        return _GREETED_HR if croatian else _GREETED
     return None
 
 
@@ -1274,6 +1288,7 @@ CROATIAN_DANCES = {
         "text": "Linđo is the lively couples' dance of Dubrovnik and the "
                 "Konavle region, led by a fiddler playing the three-stringed "
                 "lijerica.",
+        "text_hr": "Linđo je živahni parovni ples Dubrovnika i Konavala, koji vodi svirač na troglasnoj lijerici.",
         "video": "videos/LINDO.mp4",
         "start": 0,
     },
@@ -1283,6 +1298,7 @@ CROATIAN_DANCES = {
         "text": "Nijemo Kolo is the silent circle dance of the Dalmatian "
                 "hinterland, danced with no music at all — only the dancers' "
                 "steps — and UNESCO lists it as intangible cultural heritage.",
+        "text_hr": "Nijemo kolo je ples Dalmatinske zagore koji se pleše bez ikakve glazbe — čuju se samo koraci plesača — a UNESCO ga je uvrstio u nematerijalnu kulturnu baštinu.",
         "video": "videos/NIJEMO_KOLO.mp4",
         "start": 0,
     },
@@ -1291,6 +1307,7 @@ CROATIAN_DANCES = {
         "text": "Drmeš is a fast shaking dance from northern Croatia, danced "
                 "in small tight circles or pairs with a trembling step that "
                 "gives it its name.",
+        "text_hr": "Drmeš je brzi ples sjeverne Hrvatske, koji se pleše u malim zbijenim kolima ili u paru, s drhtavim korakom po kojem je dobio ime.",
         "video": "videos/DRMES.mp4",
         "start": 0,
     },
@@ -1300,6 +1317,7 @@ CROATIAN_DANCES = {
         "text": "LADO is Croatia's national folk dance ensemble, founded in "
                 "1949 to perform the dances and songs of every Croatian region "
                 "in their authentic costumes.",
+        "text_hr": "LADO je hrvatski nacionalni folklorni ansambl, osnovan 1949. godine, koji izvodi plesove i pjesme svih hrvatskih krajeva u izvornim nošnjama.",
         "video": "videos/LADO.mp4",
         "start": 0,
     },
@@ -1308,6 +1326,7 @@ CROATIAN_DANCES = {
         "text": "The dances of Gorski Kotar come from Croatia's forested "
                 "highlands between Zagreb and the sea, a region whose mountain "
                 "villages kept their own steps and songs.",
+        "text_hr": "Plesovi Gorskog kotara dolaze iz šumovitog gorja između Zagreba i mora, kraja čija su planinska sela sačuvala vlastite korake i pjesme.",
         "video": "videos/GORSKI_KOTAR.mp4",
         "start": 0,
     },
@@ -1336,9 +1355,19 @@ def _croatian_dance(text):
     return named[0][1], named[0][2]
 
 
-def _croatian_dance_reply(name, info):
-    """Her answer: the sentence, and the video when there is one to show."""
-    out = {"mode": "video", "reply": info["text"]}
+def _croatian_dance_reply(name, info, croatian=False):
+    """Her answer: the sentence, and the video when there is one to show.
+
+    Asked in Croatian about a Croatian dance, she answers in Croatian. That is
+    the one case where replying in English would be most obviously wrong, and
+    it was: "Što je Linđo?" came back describing Dubrovnik in English.
+
+    Both versions are written out. A model asked to translate on the spot will
+    phrase it differently every time and occasionally get a fact wrong, and
+    nobody on the team can check a Croatian sentence live at a stand.
+    """
+    text = info.get("text_hr") if croatian else None
+    out = {"mode": "video", "reply": text or info["text"]}
     video = info.get("video", "")
     if not video:
         # No footage yet. Say so plainly rather than leaving a visitor waiting
@@ -1546,6 +1575,9 @@ _TTS_VOICES = {
     "Japanese": ("ja-JP", "ja-JP-Neural2-B"),
     "Korean":   ("ko-KR", "ko-KR-Neural2-B"),
     "Chinese":  ("cmn-CN", "cmn-CN-Wavenet-A"),
+    # Only used by the Cloud TTS secondary. The primary Gemini voice is
+    # multilingual and speaks Croatian from Croatian text without being told.
+    "Croatian": ("hr-HR", "hr-HR-Standard-A"),
 }
 
 
@@ -2198,6 +2230,29 @@ _EN_MARKERS = {
     "this", "that", "which", "there", "here", "with", "about", "can", "could",
     "would", "should", "tell", "me", "my", "please", "give", "name",
 }
+# Croatian function words. Croatia is ALZONA's other specialty and the reason
+# she exists at a WRO event held there, so being addressed in Croatian and
+# answering in English is the one language failure that matters most here.
+#
+# Chosen to be unmistakable: every one of these is common in ordinary Croatian
+# speech and none is an English or Filipino word. "sam", "smo" and "su" are
+# left out deliberately — "sam" is English "Sam" and the cost of a false Croatian
+# reading is a reply in a language the visitor may not read at all.
+_HR_MARKERS = {
+    "što", "sto", "tko", "kako", "gdje", "kada", "zašto", "zasto", "koji",
+    "koja", "koje", "jesi", "jeste", "možeš", "mozes", "molim", "hvala",
+    "dobar", "dobro", "jutro", "večer", "vecer", "bok", "zdravo", "ime",
+    "zovem", "zoveš", "zoves", "hrvatska", "hrvatski", "hrvatskoj", "ples",
+    "plesovi", "pjesma", "narodni", "ovo", "ona", "oni", "nije", "jest",
+    "ili", "ali", "sada", "puno", "malo", "vrlo", "također", "takoder",
+    "je", "ti", "nam", "vam", "nas", "vas", "lijepa", "lijep", "zemlja",
+    "znaš", "znas", "reci", "pokaži", "pokazi", "pjevaj", "hrvat",
+    "povijest", "povijesti", "kultura", "kulturi", "molim", "izvoli",
+}
+# Deliberately NOT here: "si" is the Filipino marker before a name, and "sam"
+# is an English one. A wrong Croatian reading answers a visitor in a language
+# they may not read at all, which is worse than answering a Croat in English.
+
 _FIL_MARKERS = {
     "ang", "ng", "mga", "ako", "ikaw", "siya", "kami", "tayo", "kayo", "sila",
     "ito", "iyan", "iyon", "ano", "sino", "saan", "kailan", "bakit", "paano",
@@ -2221,13 +2276,34 @@ def detect_reply_language(text):
     # a strong, safe signal \u2014 this keeps English questions from drifting to
     # Tagalog. Romanized CJK (no markers either way) returns None and is handled
     # by the model instruction instead.
-    words = re.findall(r"[a-z]+", text.lower())
+    # Croatian diacritics settle it on their own — no English or Filipino word
+    # carries them, so one is proof enough.
+    if any(c in text.lower() for c in "čćđšž"):
+        return "Croatian"
+
+    words = re.findall(r"[a-zčćđšž]+", text.lower())
     if words:
         en = sum(w in _EN_MARKERS for w in words)
         fil = sum(w in _FIL_MARKERS for w in words)
-        if en >= 1 and en > fil:
+        hr = sum(w in _HR_MARKERS for w in words)
+        # Croatian first when it clearly leads: someone writing without
+        # diacritics ("sto je ovo") still deserves a Croatian answer.
+        # One marker is enough when nothing English or Filipino is present.
+        # Croatian sentences are often short — "Tko si ti?", "Hrvatska je
+        # lijepa" — and requiring two of them missed exactly those.
+        if hr and not en and not fil:
+            return "Croatian"
+        if hr >= 2 and hr > en and hr > fil:
+            return "Croatian"
+        if en >= 1 and en > fil and en > hr:
             return "English"
-        if fil >= 2 and fil > en:
+        # Same courtesy as Croatian above: one unmistakable Filipino word with
+        # nothing English or Croatian beside it is Filipino. "sino ka" — who
+        # are you — carries exactly one and was falling through to no language
+        # at all, which then answered a Filipino visitor in English.
+        if fil and not en and not hr:
+            return "Filipino"
+        if fil >= 2 and fil > en and fil > hr:
             return "Filipino"
     return None
 
@@ -2400,20 +2476,28 @@ def route_command(transcript):
 
     # Croatian dances first: several names ("kolo") would otherwise be caught
     # by a broader rule further down, and this is the more specific question.
+    asked_in_croatian = detect_reply_language(transcript) == "Croatian"
+
     found = _croatian_dance(t)
     if found:
-        return _croatian_dance_reply(*found)
+        return _croatian_dance_reply(*found, croatian=asked_in_croatian)
 
     # "show me a Croatian dance" — no dance named, so she picks one. Rotating
     # rather than random: a visitor who asks twice should not be shown the same
     # dance twice, and a demo run repeatedly should not look like it knows one.
-    if ("croatia" in t or "croatian" in t) and any(
-            w in t for w in ("dance", "dances", "folk", "sayaw")):
+    # Asked in Croatian too: someone who says "pokaži mi hrvatski ples" is
+    # asking exactly this question, and matching only the English words meant
+    # she offered to talk about Filipino dances instead.
+    croatia_named = any(w in t for w in ("croatia", "croatian", "hrvatsk"))
+    dance_named = any(w in t for w in ("dance", "dances", "folk", "sayaw",
+                                       "ples", "plesov", "kolo", "folklor"))
+    if croatia_named and dance_named:
         global _croatian_turn
         names = list(CROATIAN_DANCES)
         name = names[_croatian_turn % len(names)]
         _croatian_turn += 1
-        return _croatian_dance_reply(name, CROATIAN_DANCES[name])
+        return _croatian_dance_reply(name, CROATIAN_DANCES[name],
+                                     croatian=asked_in_croatian)
 
     for name, path in DANCES.items():
         if name in t:

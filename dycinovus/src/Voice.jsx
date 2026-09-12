@@ -73,6 +73,9 @@ const SR_LANGS = [
   { code: "en-PH", label: "English (PH)" },
   { code: "en-US", label: "English (US)" },
   { code: "fil-PH", label: "Filipino" },
+  // Croatia is her other specialty, and a WRO event held there will have
+  // Croatian speakers in front of her.
+  { code: "hr-HR", label: "Hrvatski" },
   { code: "ja-JP", label: "日本語" },
   { code: "ko-KR", label: "한국어" },
   { code: "zh-CN", label: "中文" },
