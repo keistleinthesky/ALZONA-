@@ -56,6 +56,8 @@ function App({ SingPanel = Sing }) {
   const [uploadingKnowledge, setUploadingKnowledge] = useState(false)
   const [coinFields, setCoinFields] = useState(null)  // the coin rows to show
   const [coinVerdict, setCoinVerdict] = useState(null)  // real / fake / unclear
+  // The last coin answer already shown, so a background read is spoken once.
+  const lastCoinSeq = useRef(0)
   const [singCommand, setSingCommand] = useState(null) // armed by a spoken command
   // Who holds the microphone. Exactly one of the two panels may: the speech
   // recogniser in Voice owns the device while it runs, so the singing panel
@@ -151,6 +153,33 @@ function App({ SingPanel = Sing }) {
 
         if (isMounted) {
           setBackendState(data)
+
+          // A coin she was ASKED about, read in the background while she was
+          // already talking. The sequence number is what distinguishes a new
+          // answer from the one already on screen — comparing the fields would
+          // miss someone holding up the same coin twice.
+          const coin = data.coin
+          if (coin && coin.seq && coin.seq !== lastCoinSeq.current) {
+            lastCoinSeq.current = coin.seq
+            if (coin.fields) {
+              setCoinFields(coin.fields)
+              setCoinVerdict(coin.verdict ?? null)
+            }
+            const say = coin.spoken || coin.error
+            if (say) {
+              setReply(say)
+              // Her own voice, through the same route as any other reply, so
+              // the singing panel still knows the sound is hers.
+              const form = new FormData()
+              form.append('text', say)
+              fetch(`${BASE_URL}/say`, { method: 'POST', body: form })
+                .then((r) => r.json())
+                .then((d) => {
+                  if (d.tts_url) setAudioSrc(`${BASE_URL}${d.tts_url}?t=${Date.now()}`)
+                })
+                .catch(() => {})
+            }
+          }
         }
       } catch (error) {
         console.error('State sync failed:', error)

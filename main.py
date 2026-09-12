@@ -1725,6 +1725,42 @@ except Exception as _e:
 _THERMAL_FIRST = os.environ.get("BAYBAYIN_THERMAL", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
+# The coin she was asked about, filled in when the vision model answers.
+#
+# Reading a coin takes about four and a half seconds — the model's own latency,
+# not the image, which is one tile. Held synchronously that is four and a half
+# seconds of a robot standing mute in front of a visitor who just asked it a
+# question. She acknowledges immediately instead and the answer arrives here,
+# picked up by the /state poll the console already runs every second.
+last_coin_result = {"seq": 0, "fields": None, "spoken": "", "error": ""}
+_coin_busy = False
+
+
+def _coin_in_background():
+    """Read the coin off the current frame, then leave the answer on /state."""
+    global last_coin_result, _coin_busy
+    try:
+        result = identify_coin(latest_frame)
+        if result.get("ok"):
+            last_coin_result = {
+                "seq": last_coin_result["seq"] + 1,
+                "fields": result["fields"],
+                "spoken": result.get("spoken", ""),
+                "error": "",
+            }
+        else:
+            last_coin_result = {
+                "seq": last_coin_result["seq"] + 1,
+                "fields": None, "spoken": "",
+                "error": result.get("error", "I couldn't read that coin."),
+            }
+    except Exception as e:
+        last_coin_result = {"seq": last_coin_result["seq"] + 1, "fields": None,
+                            "spoken": "", "error": str(e)[:120]}
+    finally:
+        _coin_busy = False
+
+
 # What the last print attempt did, surfaced on /state so the UI can show it.
 last_print_status = {"word": None, "ok": None, "detail": "", "time": 0}
 
@@ -2305,10 +2341,15 @@ def route_command(transcript):
                                  "ano", "anong", "kilalanin", "tingnan")):
         if latest_frame is None:
             return {"mode": "coin", "reply": "The camera isn't ready yet."}
-        result = identify_coin(latest_frame)
-        if not result.get("ok"):
-            return {"mode": "coin", "reply": result.get("error", "I couldn't read that coin.")}
-        return {"mode": "coin", "reply": result["spoken"], "coin": result["fields"]}
+        # Acknowledge now, read the coin behind it. The answer reaches the
+        # console through /state, which it polls anyway — no new plumbing, and
+        # nobody waits in silence for a model round trip.
+        global _coin_busy
+        if not _coin_busy:
+            _coin_busy = True
+            threading.Thread(target=_coin_in_background, daemon=True).start()
+        return {"mode": "coin", "reply": "Let me look at that coin.",
+                "coin_pending": True}
 
     if wants_baybayin(t):
         target = extract_baybayin_target(transcript)
@@ -2564,6 +2605,7 @@ async def listen(file: UploadFile = File(...)):
                     "image_url": result.get("image_url"),
                     "video_url": result.get("video_url"),
                     "coin": result.get("coin"), "sing": result.get("sing"),
+                    "coin_pending": result.get("coin_pending"),
                     "tts_url": f"/tts/{tts}" if tts else None}
 
         return {"kind": "none"}
@@ -2648,6 +2690,9 @@ def state():
         'chat': True,
         'running': running,
         'print_status': last_print_status,
+        # Rises by one each time a coin is read, so the console can tell a new
+        # answer from the one it already showed.
+        'coin': last_coin_result,
     }
 
 
@@ -2843,6 +2888,9 @@ async def command(text: str = Form(...), skip_tts: str = Form(""),
         "word": result.get("word"), "command": result.get("command"),
         "coin": result.get("coin"), "printing": result.get("printing"),
         "sing": result.get("sing"),
+        # True while a coin is still being read in the background; the answer
+        # itself arrives on /state.
+        "coin_pending": result.get("coin_pending"),
         "tts_url": f"/tts/{tts}" if tts else None,
     }
 
