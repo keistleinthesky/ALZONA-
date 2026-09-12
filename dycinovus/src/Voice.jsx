@@ -399,8 +399,15 @@ export default function VoiceRecorder({
         const res = await fetch(`${baseUrl}/state`);
         if (!res.ok) return;
         const data = await res.json();
+        // Deliberately NOT gated on the camera seeing a face.
+        //
+        // It used to be. The cost was a robot that went silent for reasons
+        // nobody could see: pointed at a wall, a visitor standing slightly off
+        // to one side, poor light — she simply stopped answering, and every
+        // time it read as a broken microphone. The face was never what made
+        // listening safe anyway; her NAME is. Nothing is acted on until she
+        // hears it, so the camera has no say in whether she can hear at all.
         const ready =
-          data.face_state === "ALZONA" &&
           !recording &&
           !busyRef.current &&
           !suspendedRef.current &&
@@ -419,7 +426,7 @@ export default function VoiceRecorder({
           // Throttled: one line every 5s is enough to see which gate is shut,
           // without burying the singing telemetry in the same log.
           lastPollTrace.current = performance.now();
-          trace(baseUrl, `idle face=${data.face_state} rec=${recording} `
+          trace(baseUrl, `idle face=${data.face_state} (not a gate) rec=${recording} `
             + `busy=${busyRef.current} suspended=${suspendedRef.current} `
             + `self=${hearingSelf(performance.now())}`);
         }
