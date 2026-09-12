@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { detectPitch, hzFromMidi, midiFromHz, noteLabel } from '../src/pitch'
 import { hearingSelf, whenQuiet } from '../src/selfVoice'
+import {
+  MIN_DISTINCT_TO_MATCH,
+  counterpart,
+  framesToNotes,
+  identifyPart,
+} from '../src/scoreMatch'
 import HarmonyChart, { PART_COLORS } from './HarmonyChart'
 import {
   HarmonyPlayer,
@@ -35,6 +41,16 @@ import {
 const QUIET_POLL_MS = 120
 const QUIET_WAIT_MAX_MS = 15000
 
+// The only two lines a singer realistically takes. Tenor and bass exist as
+// recordings and can be CHOSEN in Harmonise, but nobody sings the melody in
+// them, so matching a voice against them would only invite a wrong answer.
+const SINGER_PARTS = ['soprano', 'alto']
+
+// How much recent singing to test against the score. Long enough for a
+// phrase, short enough that one stray sound ages out instead of poisoning
+// every later attempt.
+const CONTOUR_MEMORY = 12
+
 const SILENCE_PAUSE = 1.2
 // Only after this much continuous silence do we call the take finished and
 // release the microphone.
@@ -45,46 +61,6 @@ const SUSTAIN_HOLD = 0.5
 // playing all 72 seconds to an empty room.
 const NO_SHOW_STOP = 12.0
 
-// -----------------------------------------------------------------------------
-// Synth voice for sing-back: a few harmonics plus gentle vibrato. Not a human
-// voice and not pretending to be — a clean pitched tone that tracks the target
-// note exactly.
-// -----------------------------------------------------------------------------
-function createVoice(ctx, destination) {
-  const now = ctx.currentTime
-  const real = new Float32Array([0, 1, 0.45, 0.28, 0.16, 0.09, 0.05])
-  const wave = ctx.createPeriodicWave(real, new Float32Array(real.length))
-
-  const osc = ctx.createOscillator()
-  osc.setPeriodicWave(wave)
-
-  const vibrato = ctx.createOscillator()
-  vibrato.frequency.value = 5.2
-  const vibratoGain = ctx.createGain()
-  vibratoGain.gain.value = 0
-  vibrato.connect(vibratoGain).connect(osc.frequency)
-
-  const filter = ctx.createBiquadFilter()
-  filter.type = 'lowpass'
-  filter.frequency.value = 2600
-
-  const gain = ctx.createGain()
-  gain.gain.value = 0
-
-  osc.connect(filter).connect(gain).connect(destination)
-  osc.start(now)
-  vibrato.start(now)
-
-  return {
-    osc,
-    gain,
-    vibratoGain,
-    stop: () => {
-      try { osc.stop() } catch { /* already stopped */ }
-      try { vibrato.stop() } catch { /* already stopped */ }
-    },
-  }
-}
 
 // `onActiveChange` is the one addition to this otherwise original panel. Only
 // one thing may hold the microphone: Voice.jsx runs speech recognition and
@@ -117,9 +93,15 @@ export default function Leader({
   const [holding, setHolding] = useState(false)
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
+  // The line ALZONA is singing in Sing back. Used to DRAW her on the
+  // chart; deliberately never written on screen as a word — which part
+  // either of you is on is not something the audience needs told.
+  const [autoPart, setAutoPart] = useState(null)
 
   // Set when a command arrives, cleared the moment it has been acted on.
   const autoStartRef = useRef(false)
+  const matchRef = useRef(null)      // where in the song she found you
+  const joiningRef = useRef(false)   // a join is already under way
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
@@ -213,49 +195,11 @@ export default function Leader({
   }, [])
 
   // ---- sing-back (synth) ----------------------------------------------------
-  const singBack = useCallback(async () => {
-    const contour = contourRef.current
-    if (contour.length < 4) {
-      setStatus('I did not hear enough singing to copy.')
-      return
-    }
-    const ctx = ctxRef.current
-    await ctx.resume()
+  // The synthesised sing-back voice that used to live here is gone. Sing
+  // back no longer copies notes at an oscillator after the fact — she
+  // recognises the line being sung and answers WHILE it is sung, with the
+  // recorded other part.
 
-    const notes = []
-    for (const p of contour) {
-      const midi = Math.round(midiFromHz(p.hz))
-      const last = notes[notes.length - 1]
-      if (last && last.midi === midi) last.end = p.t
-      else notes.push({ midi, start: p.t, end: p.t })
-    }
-    const sung = notes.filter((n) => n.end - n.start > 0.09)
-    if (!sung.length) {
-      setStatus('I did not hear a clear melody to copy.')
-      return
-    }
-
-    setStatus(`Singing back ${sung.length} notes…`)
-    const voice = createVoice(ctx, ctx.destination)
-    const t0 = ctx.currentTime + 0.08
-    const base = sung[0].start
-    voice.vibratoGain.gain.setValueAtTime(3.2, t0)
-    sung.forEach((n, i) => {
-      const at = t0 + (n.start - base)
-      const dur = Math.max(0.16, n.end - n.start)
-      voice.osc.frequency.setValueAtTime(hzFromMidi(n.midi), at)
-      voice.gain.gain.setValueAtTime(i === 0 ? 0.0001 : 0.05, at)
-      voice.gain.gain.exponentialRampToValueAtTime(0.32, at + 0.05)
-      voice.gain.gain.setValueAtTime(0.32, at + dur - 0.05)
-      voice.gain.gain.exponentialRampToValueAtTime(0.05, at + dur)
-    })
-    const total = sung[sung.length - 1].end - base
-    voice.gain.gain.setTargetAtTime(0, t0 + total, 0.06)
-    setTimeout(() => {
-      voice.stop()
-      setStatus('Done — sing again whenever you like.')
-    }, (total + 0.9) * 1000)
-  }, [])
 
   // ---- shared mic setup -----------------------------------------------------
   const openMic = useCallback(async () => {
@@ -287,6 +231,9 @@ export default function Leader({
       startedAtRef.current = ctx.currentTime
       lastVoicedRef.current = ctx.currentTime
       hasSungRef.current = false
+      matchRef.current = null
+      joiningRef.current = false
+      setAutoPart(null)
       playbackStartedRef.current = 0
       holdingRef.current = false
       sustainRef.current = { midi: null, since: 0 }
@@ -338,7 +285,18 @@ export default function Leader({
         }, waitMs)
         setStatus(`Count-in… (${bpm} BPM)`)
       } else {
-        setStatus('Listening — sing a line of Lupang Hinirang.')
+        // Sing back needs BOTH lines ready before a note is sung: the whole
+        // point is that she answers the moment she recognises where you are,
+        // and fetching audio at that moment would miss the entrance.
+        setStatus('Listening — just start singing.')
+        const loaded = await loadHarmony(baseUrl, ctx, SINGER_PARTS, cacheRef.current)
+        cacheRef.current = loaded
+        setManifest(loaded.manifest)
+        setContours(loaded.contours)
+        boundsRef.current = loaded.manifest.phrase_boundaries ?? []
+        playerRef.current = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
+          onEnded: () => { setStatus('Finished.'); teardown() },
+        })
       }
       setListening(true)
       onActiveChange?.(true)     // recognition steps aside
@@ -354,7 +312,14 @@ export default function Leader({
           setPitch({ hz, clarity })
           lastVoicedRef.current = now
           hasSungRef.current = true
-          contourRef.current.push({ t: now - startedAtRef.current, hz })
+          const at = now - startedAtRef.current
+          contourRef.current.push({ t: at, hz })
+          // Matching on the WHOLE take meant one stray sound poisoned every
+          // later attempt; only recent singing is kept.
+          const cutoff = at - CONTOUR_MEMORY
+          while (contourRef.current.length && contourRef.current[0].t < cutoff) {
+            contourRef.current.shift()
+          }
 
           // Track how long the current note has been held — used to decide
           // whether the singer is sustaining through a phrase end.
@@ -367,7 +332,43 @@ export default function Leader({
           sustainRef.current = { midi: null, since: 0 }
         }
 
-        if (player && modeRef.current === 'harmonize') {
+        // ---- Sing back: work out where they are, then come in ----------
+        if (player && modeRef.current === 'imitate'
+            && !matchRef.current && !joiningRef.current) {
+          const sung = framesToNotes(contourRef.current)
+          const cs = cacheRef.current.contours
+          if (cs && sung.length >= MIN_DISTINCT_TO_MATCH) {
+            let id = null
+            // Several window lengths: a singer who has just started has little
+            // to go on, and one mid-phrase has more than a match needs.
+            for (const take of [10, 14, 20, 8]) {
+              const recent = sung.slice(-take)
+              if (recent.length < MIN_DISTINCT_TO_MATCH) continue
+              id = identifyPart(recent, cs, SINGER_PARTS)
+              if (id) break
+            }
+            if (id) {
+              joiningRef.current = true
+              matchRef.current = id.match
+              // The OTHER line. Sing the melody and she takes the alto; sing
+              // the alto and she takes the melody.
+              const mine = counterpart(id.part, SINGER_PARTS)
+              setAutoPart(mine)
+              const lead = cacheRef.current.manifest.lead_in ?? 0
+              // Where she comes in: the point in the recording matching what
+              // has just been sung, plus however long ago that phrase began.
+              const elapsed = (now - startedAtRef.current) - sung[0].start
+              player.offset = lead + Math.max(0, id.match.time + elapsed)
+              player.start([mine])
+              playbackStartedRef.current = now
+              lastVoicedRef.current = now
+              setStatus('Singing with you.')
+              joiningRef.current = false
+            }
+          }
+        }
+
+        if (player && (modeRef.current === 'harmonize' || matchRef.current)) {
           setPlayhead(player.playhead)
           const quiet = now - lastVoicedRef.current
 
@@ -466,15 +467,12 @@ export default function Leader({
   }, [mode, parts, listening, start, teardown])
 
   const stop = useCallback(() => {
-    const wasImitate = modeRef.current === 'imitate'
+    // Sing back used to synthesise your notes back at you when you stopped.
+    // It answers WHILE you sing now, with the recorded other line, so there is
+    // nothing left to do at the end but stop.
     teardown()
-    if (wasImitate) {
-      setStatus('Thinking…')
-      setTimeout(() => singBack(), 150)
-    } else {
-      setStatus('Stopped.')
-    }
-  }, [singBack, teardown])
+    setStatus('Stopped.')
+  }, [teardown])
 
   useEffect(() => () => teardown(), [teardown])
 
@@ -550,7 +548,10 @@ export default function Leader({
       <div className="mt-3">
         <HarmonyChart
           userMidi={userMidi}
-          parts={mode === 'harmonize' ? parts : []}
+          // Two lines: yours and hers. In Sing back the part is whichever she
+          // picked; the chart shows the PITCHES, never the part name.
+          parts={mode === 'harmonize' ? parts : (autoPart ? [autoPart] : [])}
+          nameParts={mode === 'harmonize'}
           contours={contours}
           playhead={playhead}
           leadIn={manifest?.lead_in ?? 0}

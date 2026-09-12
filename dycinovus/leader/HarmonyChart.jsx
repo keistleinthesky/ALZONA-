@@ -31,7 +31,15 @@ const LOOKAHEAD = 1.5
  * @param {number}      playhead   position in the recording, seconds
  * @param {boolean}     running    whether to keep collecting history
  */
+/**
+ * Two pitch lines: the singer's and ALZONA's.
+ *
+ * `nameParts` is for Harmonise, where the parts were CHOSEN and naming them
+ * confirms the choice. Sing back passes false: she worked the line out by
+ * listening, and the chart shows what is being sung, not what it is called.
+ */
 export default function HarmonyChart({
+  nameParts = true,
   userMidi,
   parts,
   contours,
@@ -217,20 +225,35 @@ export default function HarmonyChart({
           <span className="inline-block h-2 w-4 rounded" style={{ background: USER_COLOR }} />
           <span className="font-semibold text-white/80">You</span>
         </span>
-        {['soprano', 'alto', 'tenor', 'bass'].map((p) => (
-          <span
-            key={p}
-            className={`flex items-center gap-1.5 ${
-              parts.includes(p) ? 'opacity-100' : 'opacity-25'
-            }`}
-          >
+        {nameParts ? (
+          ['soprano', 'alto', 'tenor', 'bass'].map((p) => (
+            <span
+              key={p}
+              className={`flex items-center gap-1.5 ${
+                parts.includes(p) ? 'opacity-100' : 'opacity-25'
+              }`}
+            >
+              <span
+                className="inline-block h-2 w-4 rounded"
+                style={{ background: PART_COLORS[p] }}
+              />
+              <span className="capitalize text-white/70">{p}</span>
+            </span>
+          ))
+        ) : parts.length ? (
+          // Sing back: two lines, and which part either voice is on is not
+          // named. She chose it by listening, not from a menu, and putting
+          // "alto" on the screen turns a duet into a lesson.
+          <span className="flex items-center gap-1.5">
             <span
               className="inline-block h-2 w-4 rounded"
-              style={{ background: PART_COLORS[p] }}
+              style={{ background: PART_COLORS[parts[0]] }}
             />
-            <span className="capitalize text-white/70">{p}</span>
+            <span className="text-white/70">ALZONA</span>
           </span>
-        ))}
+        ) : (
+          <span className="text-white/30">ALZONA joins once she hears you</span>
+        )}
       </div>
     </div>
   )
