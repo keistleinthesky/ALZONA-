@@ -68,6 +68,33 @@ const check = (label, ok, detail = '') => {
   check('and the window itself is still open', hearingSelf())
 }
 
+// ---- the gap before she starts talking --------------------------------------
+// The directive to start arrives with the command's answer, but the audio for
+// that answer has to be fetched first. During the fetch nothing is playing, and
+// treating that as silence is what let the count-in begin underneath the reply.
+// Whatever is about to speak must hold the window open across the fetch.
+{
+  resetSelfVoice()
+  let ranAt = null
+  const t0 = Date.now()
+  whenQuiet(() => { ranAt = Date.now() - t0 }, { pollMs: 20 })
+
+  // "About to speak": held open on a timer while the audio is fetched...
+  const holdWhileFetching = setInterval(() => markSpeaking(200), 60)
+  markSpeaking(200)
+  await sleep(300)
+  check('does not start during the fetch', ranAt === null,
+        ranAt === null ? '' : `ran after ${ranAt}ms`)
+
+  // ...then playback takes over the marking, and finally ends.
+  clearInterval(holdWhileFetching)
+  for (let i = 0; i < 6; i += 1) { markSpeaking(150); await sleep(50) }
+  check('nor while the reply is playing', ranAt === null)
+  await sleep(250)
+  check('and starts once the reply is over', ranAt !== null,
+        ranAt === null ? 'never ran' : `ran after ${ranAt}ms`)
+}
+
 // ---- cancelling actually cancels --------------------------------------------
 {
   resetSelfVoice()

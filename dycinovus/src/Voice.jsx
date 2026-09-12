@@ -350,6 +350,19 @@ export default function VoiceRecorder({
     // Anything the microphone picks up from here until this recognition
     // session ends is hers, not a visitor's.
     spokeDuringRef.current = true;
+
+    // Open the speaking window NOW, before the audio exists.
+    //
+    // She is about to talk, and everything that waits for her to finish asks
+    // this window. It used to open only once /say had answered — so for the
+    // length of that fetch she was "not speaking", and the harmony took that
+    // as its cue: the count-in started, and the reply then played over it.
+    // Held open on a timer because the fetch has no fixed duration, and
+    // released the moment real playback takes over the marking.
+    const holdWhileFetching = setInterval(() => markSpeaking(1200), 300);
+    markSpeaking(1200);
+    const doneFetching = () => clearInterval(holdWhileFetching);
+
     try {
       const form = new FormData();
       form.append("text", text);
@@ -360,15 +373,20 @@ export default function VoiceRecorder({
         // speakers the singing panel's microphone is listening to, and that
         // panel has no other way of knowing this reply is hers.
         const audio = followAudio(new Audio(`${baseUrl}${data.tts_url}?t=${Date.now()}`));
-        audio.onended = finishBusy;
-        audio.onerror = finishBusy;
+        audio.onended = () => { doneFetching(); finishBusy(); };
+        audio.onerror = () => { doneFetching(); finishBusy(); };
         markSpeaking();          // cover the gap before the first timeupdate
         await audio.play();
+        doneFetching();          // timeupdate keeps the window open from here
         return;
       }
     } catch {
       // fall through to browser voice
     }
+    // Every path from here has its own way of holding the window open, so the
+    // fetch timer stops. Left running it would keep her "speaking" for ever and
+    // nothing waiting on her would ever start.
+    doneFetching();
     if ("speechSynthesis" in window) {
       const u = new SpeechSynthesisUtterance(text);
       // Synthesis reports no progress events worth trusting, so hold the
