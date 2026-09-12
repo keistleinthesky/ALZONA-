@@ -5,7 +5,7 @@ import WRO26Logo from './assets/WRO26.png'
 import VoiceRecorder from './Voice'
 import Sing from './Sing'
 import Coin from './Coin'
-import { markSpeaking } from './selfVoice'
+import { markSpeaking, whenQuiet } from './selfVoice'
 
 const initialState = {
   face_state: 'idle',
@@ -61,6 +61,9 @@ function App({ SingPanel = Sing }) {
   const [coinVerdict, setCoinVerdict] = useState(null)  // real / fake / unclear
   // The last coin answer already shown, so a background read is spoken once.
   const lastCoinSeq = useRef(0)
+  // Cancels a clip still waiting for her to stop talking. Without it, asking
+  // about a second dance leaves the first one queued behind the answer.
+  const cancelPendingVideo = useRef(null)
   const [singCommand, setSingCommand] = useState(null) // armed by a spoken command
   // Who holds the microphone. Exactly one of the two panels may: the speech
   // recogniser in Voice owns the device while it runs, so the singing panel
@@ -131,8 +134,23 @@ function App({ SingPanel = Sing }) {
     setReply(res.reply || '')
     setMode(res.mode || 'chat')
     setImageSrc(res.image_url ? res.image_url + `?t=${Date.now()}` : null)
-    setVideoSrc(res.video_url || null)
+
+    // The clip waits for her to finish saying what it is.
+    //
+    // Starting it as soon as the answer arrives put the dance music straight
+    // over the sentence describing the dance — two sounds at once, and the
+    // sentence is the part nobody can replay. The picture appears with the
+    // words; only the sound has to wait.
     setVideoClip({ start: res.video_start || 0, seconds: res.video_seconds || 0 })
+    if (cancelPendingVideo.current) cancelPendingVideo.current()
+    if (res.video_url) {
+      cancelPendingVideo.current = whenQuiet(() => {
+        cancelPendingVideo.current = null
+        setVideoSrc(res.video_url)
+      })
+    } else {
+      setVideoSrc(null)
+    }
     // A spoken "identify this coin" fills the coin panel just like the button.
     if (res.coin) setCoinFields(res.coin)
     // A spoken "harmonize with me in alto" arms the singing panel AND hands it
