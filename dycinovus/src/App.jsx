@@ -51,6 +51,9 @@ function App({ SingPanel = Sing }) {
   const [audioSrc, setAudioSrc] = useState(null)
   const [imageSrc, setImageSrc] = useState(null)   // Baybayin image
   const [videoSrc, setVideoSrc] = useState(null)   // folk-dance / teaching video
+  // Where the clip starts and how long it runs. A visitor watches a clip,
+  // not a performance, and the next person should not be waiting through it.
+  const [videoClip, setVideoClip] = useState({ start: 0, seconds: 0 })
   const [mode, setMode] = useState('chat')
   const [knowledgeFiles, setKnowledgeFiles] = useState([])
   const [uploadingKnowledge, setUploadingKnowledge] = useState(false)
@@ -129,6 +132,7 @@ function App({ SingPanel = Sing }) {
     setMode(res.mode || 'chat')
     setImageSrc(res.image_url ? res.image_url + `?t=${Date.now()}` : null)
     setVideoSrc(res.video_url || null)
+    setVideoClip({ start: res.video_start || 0, seconds: res.video_seconds || 0 })
     // A spoken "identify this coin" fills the coin panel just like the button.
     if (res.coin) setCoinFields(res.coin)
     // A spoken "harmonize with me in alto" arms the singing panel AND hands it
@@ -229,7 +233,11 @@ function App({ SingPanel = Sing }) {
         return
       }
 
-      const abs = (u) => (u ? `${BASE_URL}${u}` : null)
+      // A 'youtube:<id>' marker is not a path on this server; prefixing it
+      // with the backend URL produced 'http://host:5002youtube:ID' and a
+      // black frame with no error.
+      const abs = (u) =>
+        (!u ? null : u.startsWith('youtube:') ? u : `${BASE_URL}${u}`)
       applyResult({
         transcript: data.transcript,
         reply: data.reply,
@@ -328,15 +336,46 @@ function App({ SingPanel = Sing }) {
               )}
 
               {/* Video presentation plays inside the camera frame */}
-              {videoSrc && (
+              {videoSrc && (videoSrc.startsWith('youtube:') ? (
+                /* A YouTube clip. A plain <video> cannot play one — it wants a
+                   media file, and given a YouTube page it shows a black frame
+                   and no error, which looks exactly like a broken feature. */
+                // start/end are the player's own parameters, so YouTube stops
+                // itself — more reliable than a timer racing a buffering video.
+                <iframe
+                  title="Dance"
+                  src={`https://www.youtube.com/embed/${videoSrc.slice(8)}`
+                    + `?autoplay=1&rel=0&start=${videoClip.start}`
+                    + (videoClip.seconds
+                        ? `&end=${videoClip.start + videoClip.seconds}` : '')}
+                  allow="accelerometer; autoplay; encrypted-media; picture-in-picture"
+                  allowFullScreen
+                  className="absolute inset-0 h-full w-full border-0 bg-black"
+                />
+              ) : (
                 <video
                   src={videoSrc}
                   autoPlay
                   controls
+                  onLoadedMetadata={(e) => {
+                    if (videoClip.start) e.currentTarget.currentTime = videoClip.start
+                  }}
+                  onTimeUpdate={(e) => {
+                    // The file has no idea it is being clipped, so the page
+                    // has to stop it. Checked on timeupdate rather than a
+                    // timer: a video that buffers would otherwise be cut off
+                    // having played less than the thirty seconds promised.
+                    if (!videoClip.seconds) return
+                    const done = videoClip.start + videoClip.seconds
+                    if (e.currentTarget.currentTime >= done) {
+                      e.currentTarget.pause()
+                      setVideoSrc(null)
+                    }
+                  }}
                   onEnded={() => setVideoSrc(null)}
                   className="absolute inset-0 h-full w-full bg-black object-contain"
                 />
-              )}
+              ))}
             </div>
           </section>
 
@@ -500,7 +539,9 @@ function App({ SingPanel = Sing }) {
                 reply: data.reply,
                 mode: data.mode,
                 image_url: data.image_url ? `${BASE_URL}${data.image_url}` : null,
-                video_url: data.video_url ? `${BASE_URL}${data.video_url}` : null,
+                video_url: !data.video_url ? null
+                  : data.video_url.startsWith('youtube:') ? data.video_url
+                  : `${BASE_URL}${data.video_url}`,
                 coin: data.coin,
                 sing: data.sing,
               })

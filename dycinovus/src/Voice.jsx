@@ -179,7 +179,10 @@ export default function VoiceRecorder({
       form.append("skip_tts", "1");   // text now, audio in parallel via /say
       const res = await fetch(`${baseUrl}/command`, { method: "POST", body: form });
       const data = await res.json();
-      const abs = (u) => (u ? `${baseUrl}${u}` : null);
+      // A 'youtube:<id>' marker is not a path on this server; prefixing it
+      // with the backend URL produced a black frame and no error.
+      const abs = (u) =>
+        (!u ? null : u.startsWith("youtube:") ? u : `${baseUrl}${u}`);
       setResponseText(data.reply || text || "");
       onResult({
         transcript: data.transcript || text,

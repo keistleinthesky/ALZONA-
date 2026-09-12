@@ -1247,6 +1247,128 @@ def speak(text, lang_code=None, voice=None, prompt_type=None):
         return None
 
 
+# =========================================================
+# CROATIAN DANCES
+# =========================================================
+# Croatia is ALZONA's other specialty, so a Croatian dance deserves the same
+# answer a Filipino one gets: a sentence, and something to watch.
+#
+# One sentence each, written out rather than generated. These are the facts a
+# visitor is told at a stand, and they should be the same every time — a model
+# asked afresh will phrase it differently, and occasionally wrongly, which for
+# another country's heritage is worse than dull.
+#
+# `video` is either a file under source/videos/ or a YouTube id. Empty means
+# there is nothing to show yet and she says so rather than pretending.
+#
+# `start` is where the clip begins, in seconds — most recordings open with an
+# announcement or an empty stage, and a visitor gets thirty seconds. Starting
+# at zero would often spend all of them on a title card.
+# A visitor watches a clip, not a performance. Long enough to see the dance,
+# short enough that the next person is not waiting through it.
+CLIP_SECONDS = 30
+
+CROATIAN_DANCES = {
+    "linđo": {
+        "aliases": ("lindo", "linjo", "lindjo"),
+        "text": "Linđo is the lively couples' dance of Dubrovnik and the "
+                "Konavle region, led by a fiddler playing the three-stringed "
+                "lijerica.",
+        "video": "",
+    },
+    "nijemo kolo": {
+        "aliases": ("nijemo", "silent circle dance", "silent kolo"),
+        "text": "Nijemo Kolo is the silent circle dance of the Dalmatian "
+                "hinterland, danced with no music at all — only the dancers' "
+                "steps and the jingle of their ornaments — and UNESCO lists it "
+                "as intangible cultural heritage.",
+        "video": "",
+    },
+    "drmeš": {
+        "aliases": ("drmes", "drmesh"),
+        "text": "Drmeš is a fast shaking dance from northern Croatia, danced "
+                "in small tight circles or pairs with a trembling step that "
+                "gives it its name.",
+        "video": "",
+    },
+    "međimurje": {
+        "aliases": ("medimurje", "medjimurje", "medimurski"),
+        "text": "The dances of Međimurje in Croatia's far north are gentler "
+                "and more song-led than the rest, and often accompany the "
+                "region's celebrated folk singing.",
+        "video": "",
+    },
+    "konavle": {
+        "aliases": ("konavoski", "konavle dance"),
+        "text": "The dances of Konavle, south of Dubrovnik, are performed in "
+                "the region's distinctive embroidered costume and share the "
+                "lijerica accompaniment of neighbouring Linđo.",
+        "video": "",
+    },
+    "vrlika kolo": {
+        "aliases": ("vrlicko kolo", "vrličko kolo", "vrlika"),
+        "text": "The Vrlika Kolo is a circle dance from the Dalmatian town of "
+                "Vrlika, danced in a closed ring to the dancers' own steps "
+                "rather than to instruments.",
+        "video": "",
+    },
+    "slavonian": {
+        "aliases": ("slavonia", "slavonski", "slavonske"),
+        "text": "The dances of Slavonia in eastern Croatia are bright circle "
+                "and couple dances, usually led by the tamburica, the region's "
+                "plucked string band.",
+        "video": "",
+    },
+    "moreška": {
+        "aliases": ("moreska", "moresca", "korcula sword dance",
+                    "korčula sword dance", "sword dance"),
+        "text": "The Moreška of Korčula is a sword dance staged as a battle "
+                "between two kings over a captured princess, performed on the "
+                "island for more than four centuries.",
+        "video": "",
+    },
+}
+
+
+def _croatian_dance(text):
+    """The Croatian dance named in this text, or None.
+
+    Longest name first: "nijemo kolo" must win over a bare "kolo", and
+    "korčula sword dance" over "sword dance".
+    """
+    t = (text or "").lower()
+    named = []
+    for name, info in CROATIAN_DANCES.items():
+        for key in (name,) + tuple(info["aliases"]):
+            if key in t:
+                named.append((len(key), name, info))
+    if not named:
+        return None
+    named.sort(reverse=True)
+    return named[0][1], named[0][2]
+
+
+def _croatian_dance_reply(name, info):
+    """Her answer: the sentence, and the video when there is one to show."""
+    out = {"mode": "video", "reply": info["text"]}
+    video = info.get("video", "")
+    if not video:
+        # No footage yet. Say so plainly rather than leaving a visitor waiting
+        # for a video that is never going to appear.
+        out["mode"] = "chat"
+        return out
+    start = int(info.get("start", 0))
+    if video.startswith("videos/"):
+        out["video_url"] = f"/media/{video}"
+    else:
+        # A YouTube id. The console embeds these; a plain <video> cannot play
+        # a YouTube page, only a media file.
+        out["video_url"] = f"youtube:{video}"
+    out["video_start"] = start
+    out["video_seconds"] = CLIP_SECONDS
+    return out
+
+
 DANCES = {
     "tinikling": "videos/tinikling.mp4",
     "cariñosa": "videos/carinosa.mp4", "carinosa": "videos/carinosa.mp4",
@@ -2288,10 +2410,20 @@ def route_command(transcript):
     #                  if ok else f"I understood '{cmd}', but no Arduino is connected.")
     #         return {"mode": "arduino", "reply": reply, "command": cmd}
 
+    # Croatian dances first: several names ("kolo") would otherwise be caught
+    # by a broader rule further down, and this is the more specific question.
+    found = _croatian_dance(t)
+    if found:
+        return _croatian_dance_reply(*found)
+
     for name, path in DANCES.items():
         if name in t:
             return {"mode": "video", "reply": f"Here is the {name.title()}, a Filipino folk dance.",
-                    "video_url": f"/media/{path}"}
+                    "video_url": f"/media/{path}",
+                    # The same thirty seconds every dance gets. A visitor
+                    # watches a clip; the next one should not wait through a
+                    # full performance.
+                    "video_start": 0, "video_seconds": CLIP_SECONDS}
 
     # Philippine festival dance -> the Singkil, every time.
     #
@@ -2308,7 +2440,8 @@ def route_command(transcript):
                           "royal dance from Lanao, from the Darangen epic, "
                           "danced between crossing bamboo poles. It is the "
                           "showpiece of Philippine festival stages."),
-                "video_url": f"/media/{SINGKIL_VIDEO}"}
+                "video_url": f"/media/{SINGKIL_VIDEO}",
+                "video_start": 0, "video_seconds": CLIP_SECONDS}
     # if ("baybayin" in t or "baybay" in t) and any(w in t for w in ["teach", "learn", "video", "tutorial", "lesson"]):
     #     return {"mode": "video", "reply": "Here is a video teaching the Baybayin script.",
     #             "video_url": f"/media/{TEACHING_VIDEO}"}
@@ -2606,6 +2739,8 @@ async def listen(file: UploadFile = File(...)):
                     "video_url": result.get("video_url"),
                     "coin": result.get("coin"), "sing": result.get("sing"),
                     "coin_pending": result.get("coin_pending"),
+                    "video_start": result.get("video_start"),
+                    "video_seconds": result.get("video_seconds"),
                     "tts_url": f"/tts/{tts}" if tts else None}
 
         return {"kind": "none"}
@@ -2891,6 +3026,8 @@ async def command(text: str = Form(...), skip_tts: str = Form(""),
         # True while a coin is still being read in the background; the answer
         # itself arrives on /state.
         "coin_pending": result.get("coin_pending"),
+        "video_start": result.get("video_start"),
+        "video_seconds": result.get("video_seconds"),
         "tts_url": f"/tts/{tts}" if tts else None,
     }
 
