@@ -210,32 +210,78 @@ export function matchPosition(userNotes, partNotes, opts = {}) {
   }
 }
 
+// An octave is not a key. Someone singing the alto line an octave up is still
+// singing alto, but the raw offset reads +12 — "miles from alto" — and the old
+// tie-break handed them the soprano line for it. Folding to the nearest octave
+// measures what actually matters: how far from the WRITTEN PITCH they are,
+// regardless of which octave they are comfortable in.
+const OCTAVE = 12
+const foldToOctave = (semis) => semis - OCTAVE * Math.round(semis / OCTAVE)
+
+// How much the pitch register is allowed to weigh against the interval fit.
+// Intervals identify the melody; register separates two lines that move in
+// parallel, which is exactly where intervals alone cannot decide.
+const REGISTER_WEIGHT = 0.5
+
+// The winner must beat the runner-up by this much. Below it both lines fit the
+// singing about equally, and committing is a coin toss that sounds wrong for a
+// bar and then diverges. Refusing costs a phrase of waiting; guessing costs the
+// whole entrance.
+const PART_MARGIN = 0.15
+
 /**
  * Work out WHICH line the singer is on, so ALZONA can take the other.
  *
- * Two signals, in order:
- *  1. how well the sung intervals fit that part — the lines are different
- *     melodies, so usually only one fits;
- *  2. when both fit, because the parts move in parallel through some passages,
- *     the singer's absolute pitch decides. Someone on the alto line sits at
- *     alto pitch: a near-zero offset against alto, a large one against soprano.
+ * Two independent signals, combined rather than ranked:
+ *
+ *  1. INTERVAL FIT — the lines are different melodies, so usually only one of
+ *     them moves the way the singer is moving. Transposition-invariant, so it
+ *     holds in any key.
+ *  2. REGISTER — where the voice actually sits. Through passages where the two
+ *     parts move in parallel the intervals are identical and cannot decide;
+ *     someone on the alto line sits at alto pitch, and that settles it. Octave
+ *     is folded out first: singing alto an octave up is still singing alto.
+ *
+ * Returns null when the two are too close to call, which is a real answer —
+ * she keeps listening and comes in a phrase later rather than on the wrong line.
  */
 export function identifyPart(userNotes, contours, candidates, opts = {}) {
+  const {
+    partMargin = PART_MARGIN,
+    minConfidence = 0,
+    registerWeight = REGISTER_WEIGHT,
+  } = opts
+
   const found = []
   for (const part of candidates) {
     const notes = contours?.[part]?.notes
     if (!notes) continue
     const m = matchPosition(userNotes, notes, opts)
-    if (m) found.push({ part, match: m })
+    if (!m || m.confidence < minConfidence) continue
+    // 0 = singing exactly at the written pitch (in some octave), 6 = a tritone
+    // away, which is as far as it is possible to be.
+    const keyError = Math.abs(foldToOctave(m.semitoneOffset))
+    const score = m.confidence + registerWeight * (1 - keyError / 6)
+    found.push({ part, match: m, keyError, score })
   }
   if (!found.length) return null
 
-  found.sort((a, b) => {
-    const dc = b.match.confidence - a.match.confidence
-    if (Math.abs(dc) > 0.15) return dc
-    return Math.abs(a.match.semitoneOffset) - Math.abs(b.match.semitoneOffset)
-  })
-  return { part: found[0].part, match: found[0].match, alternatives: found.slice(1) }
+  found.sort((a, b) => b.score - a.score)
+  const best = found[0]
+  const second = found[1]
+
+  // Too close to call. Say so rather than pick one.
+  if (second && best.score - second.score < partMargin) return null
+
+  return {
+    part: best.part,
+    match: best.match,
+    keyError: best.keyError,
+    score: best.score,
+    margin: second ? best.score - second.score : Infinity,
+    runnerUp: second ? { part: second.part, score: second.score } : null,
+    alternatives: found.slice(1),
+  }
 }
 
 /** The line ALZONA should sing against a singer on `part`. */

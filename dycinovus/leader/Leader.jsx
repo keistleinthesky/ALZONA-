@@ -339,13 +339,14 @@ export default function Leader({
           const cs = cacheRef.current.contours
           if (cs && sung.length >= MIN_DISTINCT_TO_MATCH) {
             let id = null
+            let matchedWindow = null
             // Several window lengths: a singer who has just started has little
             // to go on, and one mid-phrase has more than a match needs.
             for (const take of [10, 14, 20, 8]) {
               const recent = sung.slice(-take)
               if (recent.length < MIN_DISTINCT_TO_MATCH) continue
               id = identifyPart(recent, cs, SINGER_PARTS)
-              if (id) break
+              if (id) { matchedWindow = recent; break }
             }
             if (id) {
               joiningRef.current = true
@@ -355,15 +356,36 @@ export default function Leader({
               const mine = counterpart(id.part, SINGER_PARTS)
               setAutoPart(mine)
               const lead = cacheRef.current.manifest.lead_in ?? 0
-              // Where she comes in: the point in the recording matching what
-              // has just been sung, plus however long ago that phrase began.
-              const elapsed = (now - startedAtRef.current) - sung[0].start
-              player.offset = lead + Math.max(0, id.match.time + elapsed)
+
+              // Where she comes in.
+              //
+              // match.time is where the FIRST NOTE OF THE MATCHED WINDOW sits in
+              // the recording — not the first note of the take. Measuring the
+              // elapsed time from the start of the whole take instead put her
+              // seconds further into the song with every phrase sung, which is
+              // heard as her singing something else entirely.
+              const sinceMatchStart =
+                (now - startedAtRef.current) - matchedWindow[0].start
+              player.offset = lead + Math.max(0, id.match.time + sinceMatchStart)
               player.start([mine])
               playbackStartedRef.current = now
               lastVoicedRef.current = now
               setStatus('Singing with you.')
               joiningRef.current = false
+
+              // What she decided and why. Reading this back is the only way to
+              // tell "she chose the wrong line" from "she chose the right line
+              // in the wrong place" — they sound identical from the room.
+              try {
+                const fd = new FormData()
+                fd.append('line',
+                  `SING heard=${id.part} sings=${mine} `
+                  + `at=${id.match.time.toFixed(2)}s enters=${player.offset.toFixed(2)}s `
+                  + `since=${sinceMatchStart.toFixed(2)}s conf=${id.match.confidence.toFixed(2)} `
+                  + `key=${id.keyError} margin=${id.margin === Infinity ? 'sole' : id.margin.toFixed(2)} `
+                  + `notes=[${matchedWindow.map((n) => n.midi).join(',')}]`)
+                fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
+              } catch { /* telemetry must never break the entrance */ }
             }
           }
         }
