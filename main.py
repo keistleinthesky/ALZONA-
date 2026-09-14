@@ -1128,7 +1128,7 @@ def identity_reply(text):
     t = (text or "").strip()
     if not t:
         return None
-    full, greeted = _IDENTITY_BY_LANG.get(current_language,
+    full, greeted = _IDENTITY_BY_LANG.get(language_for(t),
                                           (_IDENTITY, _GREETED))
     if _WHO_ARE_YOU.search(t):
         return full
@@ -1140,18 +1140,18 @@ def identity_reply(text):
 # =========================================================
 # THE LANGUAGE SHE IS SPEAKING
 # =========================================================
-# A SETTING, not a guess. She answers in this language until someone asks her
-# to change, and a question asked in another language does not move her.
+# She answers in whatever language she was spoken to in, and this is what she
+# falls back on when a message does not clearly belong to any of them.
 #
-# Guessing per message was the obvious design and the wrong one. A visitor
-# asking in Spanish gets a Spanish answer, the next question comes out as a
-# Taglish mixture or a name the detector cannot place, and she switches back
-# mid-conversation. At a stand where several people take turns, she would drift
-# between languages with nobody having asked for it. Being asked is
-# unambiguous; guessing is not.
+# Detection leads: ask in Spanish and the answer is Spanish, with nothing to
+# set first. But a question is often not clearly in any language — a bare name,
+# "Tinikling?", a Taglish mixture, a number — and switching to English on every
+# one of those would leave a Spanish-speaking visitor being answered in English
+# every other turn. So an unrecognised message keeps whatever she was last
+# speaking, and an explicit request sets it outright.
 #
-# The one thing that does NOT follow this is the dance descriptions, which are
-# always English by decision — see CROATIAN_DANCES.
+# The one thing that does NOT follow the language at all is the dance
+# descriptions, which are always English by decision — see CROATIAN_DANCES.
 SPOKEN_LANGUAGES = ("English", "Filipino", "Spanish", "Chinese", "Croatian")
 
 current_language = "English"
@@ -1235,6 +1235,20 @@ def set_language(name):
     global current_language
     current_language = name
     return _LANG_ACK.get(name, _LANG_ACK["English"])
+
+
+def language_for(text):
+    """The language to answer this message in.
+
+    What it is written in, when that can be told; otherwise whatever she was
+    last speaking. Remembered either way, so a conversation that starts in
+    Spanish stays in Spanish through the questions too short to identify.
+    """
+    global current_language
+    found = detect_reply_language(text)
+    if found in SPOKEN_LANGUAGES:
+        current_language = found
+    return current_language
 
 
 def detect_reset_command(text):
@@ -2899,13 +2913,12 @@ def route_command(transcript):
 
     try:
         context = retrieve_knowledge(transcript)
-        # The language she was ASKED to speak, not the one this question
-        # happened to be in. A visitor may ask in Taglish, or use a name the
-        # detector cannot place; neither should move her.
+        # The language this question is in, falling back to the last one she
+        # was speaking when it cannot be told — see current_language.
+        lang = language_for(transcript)
         lang_rule = (
-            f"Reply ONLY in {current_language}, whatever language the question "
-            f"is written in. Do not translate the question back, and do not "
-            f"switch languages on your own."
+            f"Reply ONLY in {lang}. Do not translate the question back, and do "
+            f"not explain the user's own words to them."
         )
 
         parts = []
@@ -3286,7 +3299,13 @@ def transcribe_clip(data):
     model, so it forces Filipino audio onto the nearest English it knows and
     reports itself certain: "baybayin" came back as "by buying", "into buying"
     and "by Bayern", and the word to translate as Leslie, Guadalupe, Kishata.
-    Gemini has the vocabulary, and this is the same call /listen already makes.
+
+    It is also the only way a language OTHER than the selected one is heard at
+    all. The Web Speech API cannot detect language — it transcribes whatever it
+    is given as the language it was told to expect — so a visitor speaking
+    Spanish into a recogniser set to en-PH produces English-shaped nonsense.
+    This transcribes what was actually said, in whatever language it was said,
+    which is what lets her answer in it.
     """
     if not data:
         return ""
@@ -3295,13 +3314,16 @@ def transcribe_clip(data):
             model=CHAT_MODEL,
             contents=[
                 types.Part.from_bytes(data=data, mime_type="audio/webm"),
-                "Transcribe this clip verbatim. The speaker is Filipino and may "
-                "mix English and Filipino in one sentence, and may name Filipino "
-                "words, places and people — including 'Baybayin', the pre-colonial "
-                "Philippine script, and 'ALZONA', the robot they are addressing. "
-                "Write exactly what was said, with no translation, no commentary "
-                "and no quotation marks. Reply with an empty string if there is "
-                "no speech.",
+                "Transcribe this clip verbatim, in whatever language it is "
+                "spoken. It will be English, Filipino, Spanish, Mandarin "
+                "Chinese or Croatian, and may mix English with any of them in "
+                "one sentence. Write it in that language's own script — do NOT "
+                "translate it into English, and do not romanise Chinese. "
+                "Expect Filipino and Croatian names of places, dances and "
+                "people, including 'Baybayin', the pre-colonial Philippine "
+                "script, and 'ALZONA', the robot being addressed. Write exactly "
+                "what was said, with no commentary and no quotation marks. "
+                "Reply with an empty string if there is no speech.",
             ],
             config=GEN_CONFIG_FAST,
         )
