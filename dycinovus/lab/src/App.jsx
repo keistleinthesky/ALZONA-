@@ -64,6 +64,14 @@ function App({ SingPanel = Sing }) {
   // Cancels a clip still waiting for her to stop talking. Without it, asking
   // about a second dance leaves the first one queued behind the answer.
   const cancelPendingVideo = useRef(null)
+  // This console's identity, for anything the backend answers later.
+  //
+  // The coin is read in the background and delivered on /state, which EVERY
+  // console polls — so all of them saw the answer and all of them spoke it.
+  // With three consoles open that is three voices reading the same sentences
+  // over each other. The answer now carries who asked, and only they say it.
+  const consoleId = useRef(
+    `${location.port || '80'}-${Math.random().toString(36).slice(2, 8)}`)
   const [singCommand, setSingCommand] = useState(null) // armed by a spoken command
   // Who holds the microphone. Exactly one of the two panels may: the speech
   // recogniser in Voice owns the device while it runs, so the singing panel
@@ -183,11 +191,14 @@ function App({ SingPanel = Sing }) {
           const coin = data.coin
           if (coin && coin.seq && coin.seq !== lastCoinSeq.current) {
             lastCoinSeq.current = coin.seq
+            // Someone else's question. The panel is shared, so the fields are
+            // still worth showing, but the answer is not ours to say.
+            const mine = !coin.asked_by || coin.asked_by === consoleId.current
             if (coin.fields) {
               setCoinFields(coin.fields)
               setCoinVerdict(coin.verdict ?? null)
             }
-            const say = coin.spoken || coin.error
+            const say = mine ? (coin.spoken || coin.error) : ''
             if (say) {
               setReply(say)
               // Her own voice, through the same route as any other reply, so
@@ -446,7 +457,8 @@ function App({ SingPanel = Sing }) {
             <div className="mt-3 space-y-2">
 
               <div>
-                <VoiceRecorder baseUrl={BASE_URL} onResult={applyResult} suspended={singing} />
+                <VoiceRecorder baseUrl={BASE_URL} onResult={applyResult}
+                  suspended={singing} clientId={consoleId.current} />
               </div>
 
               <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">

@@ -101,6 +101,9 @@ export default function VoiceRecorder({
   // owning the device, so it must actually STOP — not merely ignore what it
   // hears — or it restarts the singing side out of the microphone every second.
   suspended = false,
+  // Supplied by App so the whole console shares one identity. Anything the
+  // backend answers later can then be matched to the console that asked.
+  clientId: consoleId = "",
 }) {
 
   const [recording, setRecording] = useState(false);
@@ -177,6 +180,7 @@ export default function VoiceRecorder({
     try {
       const form = new FormData();
       form.append("text", text);
+      if (consoleId) form.append("client", consoleId);
       // The audio, for the backend to fall back on when this text is not a
       // command it recognises. It decides; sending it costs nothing until then.
       if (clip) form.append("audio", clip, "utterance.webm");

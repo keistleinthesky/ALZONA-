@@ -2234,11 +2234,15 @@ _THERMAL_FIRST = os.environ.get("BAYBAYIN_THERMAL", "1").strip().lower() not in 
 # seconds of a robot standing mute in front of a visitor who just asked it a
 # question. She acknowledges immediately instead and the answer arrives here,
 # picked up by the /state poll the console already runs every second.
-last_coin_result = {"seq": 0, "fields": None, "spoken": "", "error": ""}
+# `asked_by` is the console that asked. Every console polls /state, so without
+# it they ALL saw a new coin answer and ALL spoke it — three consoles running
+# meant three voices reading the same thing over each other.
+last_coin_result = {"seq": 0, "fields": None, "spoken": "", "error": "",
+                    "asked_by": ""}
 _coin_busy = False
 
 
-def _coin_in_background():
+def _coin_in_background(asked_by=""):
     """Read the coin off the current frame, then leave the answer on /state."""
     global last_coin_result, _coin_busy
     try:
@@ -2249,16 +2253,19 @@ def _coin_in_background():
                 "fields": result["fields"],
                 "spoken": result.get("spoken", ""),
                 "error": "",
+                "asked_by": asked_by,
             }
         else:
             last_coin_result = {
                 "seq": last_coin_result["seq"] + 1,
                 "fields": None, "spoken": "",
                 "error": result.get("error", "I couldn't read that coin."),
+                "asked_by": asked_by,
             }
     except Exception as e:
         last_coin_result = {"seq": last_coin_result["seq"] + 1, "fields": None,
-                            "spoken": "", "error": str(e)[:120]}
+                            "spoken": "", "error": str(e)[:120],
+                            "asked_by": asked_by}
     finally:
         _coin_busy = False
 
@@ -2821,7 +2828,7 @@ def detect_memory_reset(text):
     return None
 
 
-def route_command(transcript):
+def route_command(transcript, asked_by=""):
     """Dispatch a spoken command to arduino / video / baybayin / chat."""
     t = transcript.lower()
 
@@ -2955,7 +2962,8 @@ def route_command(transcript):
         global _coin_busy
         if not _coin_busy:
             _coin_busy = True
-            threading.Thread(target=_coin_in_background, daemon=True).start()
+            threading.Thread(target=_coin_in_background,
+                             args=(asked_by,), daemon=True).start()
         return {"mode": "coin", "reply": "Let me look at that coin.",
                 "coin_pending": True}
 
@@ -3460,7 +3468,8 @@ def pick_command_text(primary, alts):
 
 @app.post('/command')
 async def command(text: str = Form(...), skip_tts: str = Form(""),
-                  alts: str = Form(""), audio: UploadFile = File(None)):
+                  alts: str = Form(""), audio: UploadFile = File(None),
+                  client: str = Form("")):
     """Text command (from the browser's speech recognition) -> route -> reply.
 
     `alts` carries the recogniser's other readings of the same audio. They are
@@ -3498,7 +3507,7 @@ async def command(text: str = Form(...), skip_tts: str = Form(""),
             text = better
 
     # Gemini calls block for seconds; threadpool keeps /video streaming.
-    result = await run_in_threadpool(route_command, text)
+    result = await run_in_threadpool(route_command, text, client)
     reply = result.get("reply", "")
     tts = None
     if reply and skip_tts != "1":
