@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/* Its components live here and one level up; see src/index.css for why
+ * this has to be said explicitly. */
+@source ".";
+@source "../src";
+
+
+html,
+body,
+#root {
+  min-height: 100%;
+  background-color: #0e0e10;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #fff;
+}

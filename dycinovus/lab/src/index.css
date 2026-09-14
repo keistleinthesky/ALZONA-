@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+/* Where the components are.
+ *
+ * Tailwind scans from the Vite ROOT, and the second console's root is
+ * console-leads/, which holds nothing but an entry file. Without these the
+ * classes used in src/ and leader/ are never seen and almost no CSS is
+ * generated: the same page came out with 5 rules instead of 63, unstyled but
+ * not broken enough to throw an error. Listing the directories explicitly
+ * makes every entry point produce identical CSS regardless of its root.
+ */
+@source "../src";
+@source "../leader";
+@source "../console-leads";
+
+
+.solid_background {
+  background-color: var(--background);
+}
