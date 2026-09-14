@@ -537,9 +537,9 @@ export default function VoiceRecorder({
     try {
       const form = new FormData();
       form.append("text", text);
-      // This console uses the Gemini voice, asked for twice. Per call rather
-      // than switched off in .env, because all three consoles share one
-      // backend and .env would change 5173 and 5174 too.
+      // Every console uses the Gemini voice, asked for. Sent per call rather
+      // than switched off in .env so the choice stays visible in the code that
+      // makes it, and so one console could still differ if it needed to.
       //
       // Measured, it is the SLOWER voice: Gemini TTS takes 4.7-5.3s against
       // ElevenLabs' 0.8-1.2s, and that is the API's own latency, not anything
