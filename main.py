@@ -21,6 +21,7 @@ from google import genai
 from google.genai import types
 from google.cloud import texttospeech
 import speech_recognition as sr
+from baybayin_text import split_syllables
 
 from langdetect import detect
 
@@ -493,38 +494,6 @@ def transcribe_audio(file_path, lang_code=None):
     except sr.RequestError as e:
         print(f"Could not request results from Google Speech Recognition service; {e}")
         return None
-
-def split_syllables(text):
-
-    vowels = "aeiou"
-
-    syllables = []
-
-    words = text.lower().split()
-
-    for word in words:
-
-        i = 0
-
-        while i < len(word):
-
-            if word[i:i+3] == "nga":
-
-                syllables.append("nga")
-                i += 3
-                continue
-
-            if i + 1 < len(word) and word[i+1] in vowels:
-
-                syllables.append(word[i:i+2])
-                i += 2
-
-            else:
-
-                syllables.append(word[i])
-                i += 1
-
-    return syllables
 
 # =========================================================
 # EXTRACT EXACT BAYBAYIN SYLLABLES FROM SENTENCE
