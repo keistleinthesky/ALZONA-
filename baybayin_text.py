@@ -56,7 +56,12 @@ def to_sounds(word):
     w = w.replace("x", "ks")
     w = w.replace("ll", "ly")    # apellido -> apelyido
     w = w.replace("f", "p").replace("v", "b")
-    w = w.replace("z", "s").replace("j", "h")
+    w = w.replace("z", "s")
+
+    # A j is a dy sound - Jeremy opens Dye, not He. There is no one character
+    # for it: the d takes a virama and the y carries the vowel, so Dye is
+    # written d + ye. Filipino spells the sound the same way, as in dyip.
+    w = w.replace("j", "dy")
 
     # A doubled consonant is one sound: Betty is said be-ti, so it takes one
     # t. The g is left alone, because the double g of mangga is not a doubled

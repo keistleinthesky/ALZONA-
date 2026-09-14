@@ -17,7 +17,11 @@ GLYPHS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 CASES = [
     # --- a syllable is a sound, not a letter -------------------------------
-    ("Jeremy",     ["he", "re", "mi"]),   # the my is one sound: mi
+    # Dye-re-mi Ba-l-d. The j is a dy sound and needs two characters for
+    # it, the my at the end is one sound and needs only one, and the ld
+    # that closes bald is two consonants with no vowel left on either.
+    ("Jeremy Bald", ["d", "ye", "re", "mi", "ba", "l", "d"]),
+    ("Jeremy",     ["d", "ye", "re", "mi"]),
     ("Mary",       ["ma", "ri"]),
     ("Emily",      ["e", "mi", "li"]),
     ("gym",        ["gi", "m"]),
@@ -47,7 +51,7 @@ CASES = [
 
     # --- letters Baybayin has no sound for become the sound they make -------
     ("Filipino",   ["pi", "li", "pi", "no"]),
-    ("Jose",       ["ho", "se"]),
+    ("Jose",       ["d", "yo", "se"]),
     ("Quezon",     ["ke", "so", "n"]),
     ("Victoria",   ["bi", "k", "to", "ri", "a"]),
     ("Zamboanga",  ["sa", "m", "bo", "a", "nga"]),
