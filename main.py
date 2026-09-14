@@ -1650,6 +1650,13 @@ _TTS_COOLDOWN_SEC = 30        # back off this long after a quota (429) hit
 _tts_cooldown_until = 0.0     # skip Gemini TTS until this timestamp
 
 
+# Per-model quota cooldowns. A model that answers 429 is out for this long —
+# long enough not to keep asking, short enough that a quota window that resets
+# is noticed within a demo.
+_tts_model_cooldown = {}
+_TTS_MODEL_COOLDOWN_S = 120
+
+
 def gemini_voice(text, cache=False):
     """ALZONA's PRIMARY voice (Gemini TTS, Leda voice). Returns a wav filename,
     or None (the front-end then uses the browser voice). Resilient:
@@ -1668,9 +1675,16 @@ def gemini_voice(text, cache=False):
     if time.time() < _tts_cooldown_until:
         return None
     # 3.1 TTS is measurably faster than 2.5 with the same Leda voice; fall back
-    # to 2.5 on a transient/model error. A quota hit stops early (both models
-    # share the same project quota, so retrying the second just wastes a call).
+    # to 2.5 on a transient/model error.
+    #
+    # A model that answered 429 is SKIPPED for a while rather than tried again
+    # every single time. Measured: 3.1 gave one clip and then 429 on every call
+    # after it, so each request paid that refusal before falling through to 2.5
+    # — the refusal is fast, but the retry-after is not free and the pattern
+    # repeats for as long as the quota window lasts.
     for tts_model in ("gemini-3.1-flash-tts-preview", "gemini-2.5-flash-preview-tts"):
+        if time.time() < _tts_model_cooldown.get(tts_model, 0):
+            continue
         try:
             r = gen_content(
                 model=tts_model,
@@ -1693,6 +1707,10 @@ def gemini_voice(text, cache=False):
                 f.write(buf.getvalue())
             return fn
         except Exception as e:
+            # Out of quota for THIS model: stop asking it for a while.
+            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                _tts_model_cooldown[tts_model] = time.time() + _TTS_MODEL_COOLDOWN_S
+
             msg = str(e)
             print(f"tts model {tts_model} failed: {msg[:120]}")
             if "RESOURCE_EXHAUSTED" in msg or "429" in msg:
@@ -1865,14 +1883,20 @@ def _prerender_fixed_phrases():
     for info in CROATIAN_DANCES.values():
         phrases.append(info["text"])
 
+    # Rendered in BOTH voices. The consoles do not agree on one — 5174 uses
+    # ElevenLabs and the workbench asks for Gemini — and the cache is keyed on
+    # the text AND the file type, so a phrase cached in one voice is still a
+    # cold synthesis in the other. Rendering both means whichever console is
+    # asked, the answer is already waiting.
     done = 0
     for text in phrases:
-        try:
-            if fast_voice(text, cache=True):
-                done += 1
-        except Exception:
-            pass          # rendered on demand later, as it was before
-    print(f"TTS: {done}/{len(phrases)} fixed phrases ready to speak instantly")
+        for fast in (False, True):
+            try:
+                if fast_voice(text, True, fast):
+                    done += 1
+            except Exception:
+                pass      # rendered on demand later, as it was before
+    print(f"TTS: {done}/{len(phrases) * 2} fixed phrases ready in both voices")
 
 
 def _warm_up_tts():

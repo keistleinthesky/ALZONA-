@@ -509,10 +509,17 @@ export default function VoiceRecorder({
     try {
       const form = new FormData();
       form.append("text", text);
-      // The Gemini voice was tried here and reverted: measured on this machine
-      // it takes 6.5-7.0s against ElevenLabs' 0.8-1.2s for the same sentence,
-      // and the delay was audible in the room. Sending voice="gemini" here
-      // switches this console back without touching 5173 or 5174.
+      // This console uses the Gemini voice, asked for twice. Per call rather
+      // than switched off in .env, because all three consoles share one
+      // backend and .env would change 5173 and 5174 too.
+      //
+      // Measured, it is the SLOWER voice: Gemini TTS takes 4.7-5.3s against
+      // ElevenLabs' 0.8-1.2s, and that is the API's own latency, not anything
+      // here. What has been done about it is to stop wasting a call on the
+      // quota-exhausted 3.1 model, and to pre-render every fixed sentence in
+      // this voice too — so the dances and the introductions come back in
+      // milliseconds, and only a novel question pays the full cost.
+      form.append("voice", "gemini");
       const res = await fetch(`${baseUrl}/say`, { method: "POST", body: form });
       const data = await res.json();
       if (data.tts_url) {
