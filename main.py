@@ -1288,7 +1288,8 @@ CROATIAN_DANCES = {
         "text": "Linđo is the lively couples' dance of Dubrovnik and the "
                 "Konavle region, led by a fiddler playing the three-stringed "
                 "lijerica.",
-        "text_hr": "Linđo je živahni parovni ples Dubrovnika i Konavala, koji vodi svirač na troglasnoj lijerici.",
+        "text_hr": "Linđo je živahni parovni ples Dubrovnika i Konavala, koji "
+                   "vodi svirač na troglasnoj lijerici.",
         "video": "videos/LINDO.mp4",
         "start": 0,
     },
@@ -1298,7 +1299,9 @@ CROATIAN_DANCES = {
         "text": "Nijemo Kolo is the silent circle dance of the Dalmatian "
                 "hinterland, danced with no music at all — only the dancers' "
                 "steps — and UNESCO lists it as intangible cultural heritage.",
-        "text_hr": "Nijemo kolo je ples Dalmatinske zagore koji se pleše bez ikakve glazbe — čuju se samo koraci plesača — a UNESCO ga je uvrstio u nematerijalnu kulturnu baštinu.",
+        "text_hr": "Nijemo kolo je ples Dalmatinske zagore koji se pleše bez "
+                   "ikakve glazbe — čuju se samo koraci plesača — a UNESCO ga "
+                   "je uvrstio u nematerijalnu kulturnu baštinu.",
         "video": "videos/NIJEMO_KOLO.mp4",
         "start": 0,
     },
@@ -1307,7 +1310,9 @@ CROATIAN_DANCES = {
         "text": "Drmeš is a fast shaking dance from northern Croatia, danced "
                 "in small tight circles or pairs with a trembling step that "
                 "gives it its name.",
-        "text_hr": "Drmeš je brzi ples sjeverne Hrvatske, koji se pleše u malim zbijenim kolima ili u paru, s drhtavim korakom po kojem je dobio ime.",
+        "text_hr": "Drmeš je brzi ples sjeverne Hrvatske, koji se pleše u "
+                   "malim zbijenim kolima ili u paru, s drhtavim korakom po "
+                   "kojem je dobio ime.",
         "video": "videos/DRMES.mp4",
         "start": 0,
     },
@@ -1317,7 +1322,9 @@ CROATIAN_DANCES = {
         "text": "LADO is Croatia's national folk dance ensemble, founded in "
                 "1949 to perform the dances and songs of every Croatian region "
                 "in their authentic costumes.",
-        "text_hr": "LADO je hrvatski nacionalni folklorni ansambl, osnovan 1949. godine, koji izvodi plesove i pjesme svih hrvatskih krajeva u izvornim nošnjama.",
+        "text_hr": "LADO je hrvatski nacionalni folklorni ansambl, osnovan "
+                   "1949. godine, koji izvodi plesove i pjesme svih hrvatskih "
+                   "krajeva u izvornim nošnjama.",
         "video": "videos/LADO.mp4",
         "start": 0,
     },
@@ -1326,8 +1333,63 @@ CROATIAN_DANCES = {
         "text": "The dances of Gorski Kotar come from Croatia's forested "
                 "highlands between Zagreb and the sea, a region whose mountain "
                 "villages kept their own steps and songs.",
-        "text_hr": "Plesovi Gorskog kotara dolaze iz šumovitog gorja između Zagreba i mora, kraja čija su planinska sela sačuvala vlastite korake i pjesme.",
+        "text_hr": "Plesovi Gorskog kotara dolaze iz šumovitog gorja između "
+                   "Zagreba i mora, kraja čija su planinska sela sačuvala "
+                   "vlastite korake i pjesme.",
         "video": "videos/GORSKI_KOTAR.mp4",
+        "start": 0,
+    },
+    "vrličko kolo": {
+        "aliases": ("vrlicko kolo", "vrlicko", "vrličko", "vrlika kolo",
+                    "vrlika"),
+        "text": "The Vrličko Kolo is the circle dance of Vrlika in the "
+                "Dalmatian hinterland, danced in a closed ring to the dancers' "
+                "own steps rather than to instruments.",
+        "text_hr": "Vrličko kolo je kolo iz Vrlike u Dalmatinskoj zagori, "
+                   "koje se pleše u zatvorenom krugu uz korake samih plesača, "
+                   "a ne uz glazbala.",
+        "video": "videos/VRLICKO_KOLO.mp4",
+        "start": 0,
+    },
+    "podravski svati": {
+        "aliases": ("podravski", "svati", "podravina"),
+        "text": "Podravski Svati are the wedding dances of Podravina, the "
+                "Drava valley in northern Croatia, performed as the wedding "
+                "party itself would dance them.",
+        "text_hr": "Podravski svati su svadbeni plesovi Podravine, kraja uz "
+                   "Dravu u sjevernoj Hrvatskoj, izvedeni onako kako bi ih "
+                   "plesali sami svatovi.",
+        "video": "videos/PODRAVSKI_SVATI.mp4",
+        "start": 0,
+    },
+    "kumova grana": {
+        "aliases": ("kumova", "grana"),
+        "text": "Kumova Grana — “the best man's branch” — is a Croatian "
+                "wedding dance named for the decorated branch carried in the "
+                "wedding procession.",
+        "text_hr": "Kumova grana hrvatski je svadbeni ples nazvan po ukrašenoj "
+                   "grani koja se nosi u svatovskoj povorci.",
+        "video": "videos/KUMOVA_GRANA.mp4",
+        "start": 0,
+    },
+    "taraban": {
+        "aliases": (),
+        "text": "Taraban is a lively dance from Podravina in northern Croatia, "
+                "danced at a brisk tempo to the tamburica.",
+        "text_hr": "Taraban je živahan ples iz Podravine u sjevernoj "
+                   "Hrvatskoj, koji se pleše u brzom ritmu uz tamburicu.",
+        "video": "videos/TARABAN.mp4",
+        "start": 0,
+    },
+    "seljančica": {
+        "aliases": ("seljancica", "seljanica"),
+        "text": "Seljančica — “the village girl” — is one of the best known "
+                "Croatian kolos, a social circle dance danced at gatherings "
+                "across the country.",
+        "text_hr": "Seljančica je jedno od najpoznatijih hrvatskih kola, "
+                   "društveni ples u krugu koji se pleše na okupljanjima "
+                   "diljem zemlje.",
+        "video": "videos/SELJANCICA.mp4",
         "start": 0,
     },
 }
