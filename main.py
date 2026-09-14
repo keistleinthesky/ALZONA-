@@ -2089,13 +2089,13 @@ Decide FIRST whether the coin is genuine, then report the rest.
 
 Fields 1-7 are printed on a screen the person is already looking at, so
 reading them aloud tells them nothing they cannot see. `spoken` is the part
-they can only get by asking — FOUR sentences, told the way you would tell
+they can only get by asking — FIVE sentences, told the way you would tell
 someone who has just handed you the coin and is curious about it.
 
 - FIRST, when it was struck: the year on the coin, and the mint if it is
   marked. Say plainly that the date is not legible if it is not — a made-up
   year on a real coin is worse than admitting the picture is poor.
-- THEN three more sentences of things genuinely worth knowing that fields 1-7
+- THEN four more sentences of things genuinely worth knowing that fields 1-7
   do not already say. Reach for the specific over the general: why the design
   changed that year, what the mint mark stands for, what the coin would have
   bought at the time, how long the series ran and what replaced it, an
@@ -2103,7 +2103,8 @@ someone who has just handed you the coin and is curious about it.
   was issued, how the metal or size differs from the coin before it.
 - Be genuinely interesting, not merely enthusiastic. One concrete fact is worth
   more than three sentences of "fascinating" and "remarkable". Never pad to
-  reach four sentences — if there are only three real things to say, say three.
+  reach five — if there are only three real things to say, say three. A short
+  true answer is better than a long one padded out to length.
 - Never repeat the country, the denomination, the person shown, or whether it
   is genuine. Those are already on the screen.
 - Say what you are unsure of as unsure. A visitor who is told something
@@ -2117,7 +2118,7 @@ Rules:
 - Reply with ONE SENTENCE per field for fields 1-7. Never more than one.
 - Keep each of those sentences under 20 words, natural and warm, not a bare
   label.
-- `spoken` is up to FOUR sentences and about 90 words. It is the one field
+- `spoken` is up to FIVE sentences and about 120 words. It is the one field
   that is allowed to be long, because it is the only one nobody can read off
   the screen.
 - If a detail is genuinely not visible (worn, blurred, face-down), say so in
@@ -2188,10 +2189,10 @@ def identify_coin(jpeg_bytes):
         if verdict == "fake":
             spoken = _FAKE_SPOKEN
         else:
-            # Four sentences, ~96 words. The trim is a backstop against a
+            # Five sentences, ~120 words. The trim is a backstop against a
             # model that ignores the brief, not the intended length.
             spoken = _first_sentence(data.get("spoken", ""), max_words=24,
-                                     sentences=4)
+                                     sentences=5)
         if not spoken:
             # No spoken line came back. The panel is still right, so say the
             # one thing that is not on it rather than nothing at all.

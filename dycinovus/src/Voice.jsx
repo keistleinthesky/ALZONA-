@@ -494,6 +494,30 @@ export default function VoiceRecorder({
     // session ends is hers, not a visitor's.
     spokeDuringRef.current = true;
 
+    // Close the microphone before saying anything.
+    //
+    // It used to stay open through her whole reply and simply discard whatever
+    // it heard. Discarding was enough to stop her answering herself, but the
+    // session was still running: a visitor who spoke while she was talking had
+    // their words captured into a session that was going to be thrown away, so
+    // they went unanswered and nobody could tell why. Closing it means she is
+    // plainly not listening while she speaks, and the next thing said is heard
+    // from the start.
+    //
+    // busyRef is already true here and is cleared by finishBusy once the audio
+    // ends, so the poll that restarts listening waits for her — see
+    // startRecording, which refuses while busy.
+    const listening = recognitionRef.current;
+    if (listening) {
+      recognitionRef.current = null;
+      try {
+        // abort, not stop: stop delivers whatever it has and fires onend with
+        // results, which is a turn nobody took.
+        if (listening.abort) listening.abort();
+        else listening.stop();
+      } catch { /* already gone */ }
+    }
+
     // Open the speaking window NOW, before the audio exists.
     //
     // She is about to talk, and everything that waits for her to finish asks
