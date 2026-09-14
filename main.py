@@ -1887,7 +1887,8 @@ def _prerender_fixed_phrases():
     phrases = [_IDENTITY, _GREETED, _IDENTITY_HR, _GREETED_HR,
                _IDENTITY_ES, _GREETED_ES, _IDENTITY_ZH, _GREETED_ZH,
                _IDENTITY_FIL, _GREETED_FIL,
-               "Let me look at that coin.",
+               "Let me look at that coin.", _FAKE_SPOKEN,
+               "I could not make out the date on this one.",
                "Hello! I'm listening. How can I help you?",
                "You're welcome! Just greet me again when you need me.",
                "Which word would you like me to write in Baybayin?"]
@@ -2054,6 +2055,18 @@ COIN_ORDER = [
 # The country stays: which coin it is pretending to be is worth knowing.
 _SKIP_IF_FAKE = ("other_countries", "denomination", "featured", "significance")
 
+# What she SAYS about a counterfeit, and all she says.
+#
+# Fixed, and deliberately without detail. Everything interesting about a coin —
+# when it was struck, what the mint mark means, what the design commemorates —
+# belongs to the real coin this one is imitating, so saying any of it out loud
+# describes something the person is not holding. The panel still shows what
+# gave it away; her voice does not elaborate on a forgery.
+#
+# Being fixed also makes it instant: it is rendered with the other set phrases
+# at startup, so the answer lands immediately rather than after a synthesis.
+_FAKE_SPOKEN = "That one's a fake."
+
 
 _COIN_PROMPT = """You are identifying a coin held up to a camera.
 
@@ -2086,9 +2099,10 @@ they can only get by asking:
   have bought, how long the series ran, an engraving detail easy to miss.
 - Never repeat the country, the denomination, the person shown, or whether it
   is genuine. Those are already on the screen.
-- If the verdict is "fake", a minting date is meaningless — the coin was not
-  struck by any mint. Say what year it CLAIMS instead, and one thing a real
-  one of that year would have that this does not.
+- If the verdict is "fake", leave `spoken` empty. She says one fixed sentence
+  for a counterfeit and no detail: everything interesting about a coin belongs
+  to the real one this is imitating, and saying it aloud would describe
+  something the person is not holding.
 
 Rules:
 - Reply with ONE SENTENCE per field for fields 1-7. Never more than one.
@@ -2161,8 +2175,11 @@ def identify_coin(jpeg_bytes):
         # what was already on the screen they were looking at. The date it was
         # struck and a fact worth knowing are the parts they can only get by
         # asking her.
-        spoken = _first_sentence(data.get("spoken", ""), max_words=24,
-                                 sentences=2)
+        if verdict == "fake":
+            spoken = _FAKE_SPOKEN
+        else:
+            spoken = _first_sentence(data.get("spoken", ""), max_words=24,
+                                     sentences=2)
         if not spoken:
             # No spoken line came back. The panel is still right, so say the
             # one thing that is not on it rather than nothing at all.
