@@ -1920,12 +1920,6 @@ def _warm_up_tts():
 
 _warm_up_tts()
 
-# The fixed sentences, rendered behind the server rather than in front of it.
-# Nothing waits for this: it makes phrases faster as it goes, and a question
-# asked before it reaches one is answered at the usual speed.
-threading.Thread(target=_prerender_fixed_phrases, daemon=True).start()
-
-
 def _bay_path(key):
     p = baybayin_path.get(key)
     return os.path.join(BASE, p.lstrip("./").replace("/", os.sep)) if p else None
@@ -2035,6 +2029,18 @@ _SKIP_IF_FAKE = ("other_countries", "denomination", "featured", "significance")
 # Being fixed also makes it instant: it is rendered with the other set phrases
 # at startup, so the answer lands immediately rather than after a synthesis.
 _FAKE_SPOKEN = "That one's a fake."
+
+
+# The fixed sentences, rendered behind the server rather than in front of it.
+# Nothing waits for this: it makes phrases faster as it goes, and a question
+# asked before it reaches one is answered at the usual speed.
+#
+# Started down here rather than beside _warm_up_tts, which is where it was:
+# the list it renders includes _FAKE_SPOKEN, and up there that name does not
+# exist yet. The thread died on a NameError at every single startup, so the
+# phrases it promises to have ready were never rendered and every one of them
+# was synthesised on demand.
+threading.Thread(target=_prerender_fixed_phrases, daemon=True).start()
 
 
 _COIN_PROMPT = """You are identifying a coin held up to a camera.
