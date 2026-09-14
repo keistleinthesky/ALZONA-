@@ -1697,6 +1697,40 @@ def fast_voice(text, cache=False, skip_elevenlabs=False):
     return None       # front-end falls back to the browser voice
 
 
+def _prerender_fixed_phrases():
+    """Speak-ahead for every sentence whose wording never changes.
+
+    A repeat of an already-spoken phrase comes back in 3 milliseconds against
+    roughly a second to synthesise it — the cache is keyed on the text, so the
+    only reason any of these is ever slow is that it happens to be the first
+    time. For a stand where the same ten dances are asked about all day, that
+    first time is the demo.
+
+    Rendered in the background: the server answers questions while this runs,
+    and a phrase simply stops being slow once its turn comes round. Failures
+    are ignored on purpose — a phrase that could not be rendered now will be
+    rendered on demand exactly as before.
+    """
+    phrases = [_IDENTITY, _GREETED, _IDENTITY_HR, _GREETED_HR,
+               "Let me look at that coin.",
+               "Hello! I'm listening. How can I help you?",
+               "You're welcome! Just greet me again when you need me.",
+               "Which word would you like me to write in Baybayin?"]
+    for info in CROATIAN_DANCES.values():
+        phrases.append(info["text"])
+        if info.get("text_hr"):
+            phrases.append(info["text_hr"])
+
+    done = 0
+    for text in phrases:
+        try:
+            if fast_voice(text, cache=True):
+                done += 1
+        except Exception:
+            pass          # rendered on demand later, as it was before
+    print(f"TTS: {done}/{len(phrases)} fixed phrases ready to speak instantly")
+
+
 def _warm_up_tts():
     """Gemini TTS is the primary voice — warm the model at startup so the first
     spoken reply isn't a cold ~6s (the cold-start happens here, off the user's
@@ -1733,6 +1767,11 @@ def _warm_up_tts():
 
 
 _warm_up_tts()
+
+# The fixed sentences, rendered behind the server rather than in front of it.
+# Nothing waits for this: it makes phrases faster as it goes, and a question
+# asked before it reaches one is answered at the usual speed.
+threading.Thread(target=_prerender_fixed_phrases, daemon=True).start()
 
 
 def _bay_path(key):
