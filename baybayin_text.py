@@ -45,6 +45,7 @@ def to_sounds(word):
     w = "".join(c for c in w if not unicodedata.combining(c))
 
     w = w.replace("ph", "p")     # Philippines -> Pilipinas, as it is said
+    w = w.replace("th", "t")     # Anthony is said Antoni
     w = w.replace("ch", "ts")    # before c is dealt with, or ch becomes ks
     w = w.replace("ck", "k")
     w = re.sub(r"qu(?=[ei])", "k", w)   # Quezon -> Keson
@@ -56,6 +57,12 @@ def to_sounds(word):
     w = w.replace("ll", "ly")    # apellido -> apelyido
     w = w.replace("f", "p").replace("v", "b")
     w = w.replace("z", "s").replace("j", "h")
+
+    # A doubled consonant is one sound: Betty is said be-ti, so it takes one
+    # t. The g is left alone, because the double g of mangga is not a doubled
+    # letter at all - it is the ng of mang followed by the g of ga, two
+    # different sounds that happen to meet.
+    w = re.sub(r"([bdhklmnprstwy])\1", r"\1", w)
 
     # A y with no vowel of its own, sitting after a consonant, is doing a
     # vowel's job: Jeremy ends in an i sound, not in the glide that bahay
