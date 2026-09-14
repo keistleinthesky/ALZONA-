@@ -1588,16 +1588,33 @@ _TTS_VOICES = {
 _cloud_tts_ok = False
 
 
-def fast_voice(text, cache=False):
+def fast_voice(text, cache=False, skip_elevenlabs=False):
     """Best available TTS, in order:
     ElevenLabs (only when USE_ELEVENLABS=1) -> Gemini Leda, ALZONA's default
     voice -> Google Cloud TTS -> None, in which case the front-end uses the
-    browser voice. cache=True reuses a file for identical phrases."""
+    browser voice. cache=True reuses a file for identical phrases.
+
+    `skip_elevenlabs` goes straight to the Gemini voice. A per-CALL choice, not
+    a setting: the consoles share one backend, so turning ElevenLabs off in
+    .env would change the voice on all of them.
+
+    It is NOT the faster path, whatever the name suggests. Measured on this
+    machine, warm, same sentence both ways:
+
+        ElevenLabs   1.3-2.5s
+        Gemini       4.3-7.9s
+
+    Gemini was under a second when it was the only voice in use, so this looks
+    like the ElevenLabs warm-up keeping that connection hot while the Gemini
+    one goes cold between calls. Whoever changes this should measure again
+    rather than trust either number — including these.
+    """
     # Optional: ElevenLabs, off by default (returns None immediately when the
     # USE_ELEVENLABS switch is off — see elevenlabs_voice()).
-    fn = elevenlabs_voice(text, cache)
-    if fn:
-        return fn
+    if not skip_elevenlabs:
+        fn = elevenlabs_voice(text, cache)
+        if fn:
+            return fn
     # Default voice: Gemini Leda (resilient — see gemini_voice()).
     fn = gemini_voice(text, cache)
     if fn:
@@ -2698,15 +2715,21 @@ def delete_knowledge(filename: str):
 
 
 @app.post('/say')
-async def say(text: str = Form(...)):
-    """Speak a short phrase in ALZONA's voice (wake/stop acknowledgments)."""
+async def say(text: str = Form(...), voice: str = Form("")):
+    """Speak a short phrase in ALZONA's voice (wake/stop acknowledgments).
+
+    voice="gemini" skips ElevenLabs for this call only. The consoles share one
+    backend, so a caller that wants the faster voice asks for it rather than
+    turning it off for everybody.
+    """
     text = (text or "").strip()
     if not text:
         return JSONResponse({"tts_url": None, "error": "empty"})
+    fast = voice.strip().lower() in ("gemini", "fast", "default")
     # Threadpool keeps the event loop (and the /video stream) responsive.
     # cache=True: identical phrases (wake/stop acknowledgments, repeated
     # replies) are synthesized once and replayed instantly afterwards.
-    fn = await run_in_threadpool(fast_voice, text, True)
+    fn = await run_in_threadpool(fast_voice, text, True, fast)
     return {"tts_url": f"/tts/{fn}" if fn else None}
 
 

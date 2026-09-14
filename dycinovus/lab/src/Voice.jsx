@@ -504,6 +504,11 @@ export default function VoiceRecorder({
     try {
       const form = new FormData();
       form.append("text", text);
+      // This console skips ElevenLabs and uses the Gemini voice, as asked. NOTE:
+      // measured on this machine it is SLOWER — 4-8s against ElevenLabs 1.3-2.5s.
+      // Asked for per call rather than switched off in .env, because all three
+      // consoles share one backend and .env would change 5173 and 5174 too.
+      form.append("voice", "gemini");
       const res = await fetch(`${baseUrl}/say`, { method: "POST", body: form });
       const data = await res.json();
       if (data.tts_url) {
