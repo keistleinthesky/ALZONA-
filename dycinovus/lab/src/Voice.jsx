@@ -69,15 +69,20 @@ const STOP_RE = new RegExp(
 // place and person names as whatever English words they resemble. en-PH is
 // trained on exactly this accent and on Filipino proper nouns, and costs
 // nothing to switch to — Chrome ships both.
+// The five she is built for. Japanese and Korean were here and are gone: an
+// option nobody selects still has to be right, and a language she is not
+// prepared to answer well in is worse than one she does not offer.
+//
+// Dialects unchanged. en-PH stays the English default — it is the model
+// trained on this accent, and en-US renders "Alzona" as "Alzana" and
+// "Baybayin" as "be buying". es-ES for Spanish: Chrome has no Philippine
+// Spanish, and es-ES is the closest to how it is taught here.
 const SR_LANGS = [
   { code: "en-PH", label: "English (PH)" },
   { code: "en-US", label: "English (US)" },
   { code: "fil-PH", label: "Filipino" },
-  // Croatia is her other specialty, and a WRO event held there will have
-  // Croatian speakers in front of her.
+  { code: "es-ES", label: "Español" },
   { code: "hr-HR", label: "Hrvatski" },
-  { code: "ja-JP", label: "日本語" },
-  { code: "ko-KR", label: "한국어" },
   { code: "zh-CN", label: "中文" },
 ];
 

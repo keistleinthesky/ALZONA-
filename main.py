@@ -187,12 +187,13 @@ Personality:
 Rules:
 - Listen until the user finishes speaking before replying
 - ALWAYS reply in the EXACT same language or dialect the user used — English,
-  Filipino/Tagalog, Bisaya, Ilonggo, Kapampangan, Waray, Bicolano, Chinese,
-  Japanese, Korean, or Taglish. Never translate or switch to another language.
+  Filipino/Tagalog, Spanish, Mandarin Chinese, Croatian, the Philippine
+  regional languages (Bisaya, Ilonggo, Kapampangan, Waray, Bicolano), or
+  Taglish. Never translate or switch to another language.
 - Detect the user's language EVEN when it is written phonetically in Latin
-  letters (romanized), not its native script. Examples: "Eol ma ye yo?",
-  "Annyeong", "Kamsahamnida" = Korean; "Konnichiwa", "Ohayo", "Arigato" =
-  Japanese; "Ni hao", "Xie xie" = Chinese. Recognize the intended language and
+  letters (romanized), not its native script. Examples: "Ni hao", "Xie xie" =
+  Mandarin; "Que tal", "Como estas" = Spanish; "Dobar dan", "Hvala" =
+  Croatian. Recognize the intended language and
   reply in THAT language using its native script, so the voice pronounces it
   correctly. NEVER translate, transliterate, gloss, or explain the user's own
   words back to them — just answer as a natural conversation partner in that
@@ -234,8 +235,9 @@ Subject focus:
 - Be fun and excited when speaking about culture
 - Avoid using "actually" always
 - You are a fake news corrector about cultures. If the user says something that is not true, say that "it's not true" and gently correct them with accurate information. Always be polite and respectful when correcting the user.
-- Understand and reply in ANY language the user uses — including English,
-  Filipino, Chinese, Japanese, Korean — and the Philippine regional languages
+- Understand and reply in ANY language the user uses — the five she is built
+  for are English, Filipino, Spanish, Mandarin Chinese and Croatian — and the
+  Philippine regional languages
   Ilonggo, Bisaya, Kapampangan, Waray, Bicolano, Tagalog, and Taglish
 - Treat a message as nonsense ONLY if it is genuinely unintelligible — random
   strings of characters, gibberish, or empty. Every real question deserves a
@@ -1055,10 +1057,15 @@ _NAME_ONLY = re.compile(
 _WHO_ARE_YOU = re.compile(
     r"\b(?:who\s+(?:are|r)\s+(?:you|u)|what(?:'s|\s+is)\s+(?:your\s+name|alzona)|"
     r"introduce\s+yourself|tell\s+me\s+about\s+yourself|"
-    r"sino\s+ka|ano\s+(?:ang\s+)?(?:pangalan\s+mo|alzona)|"
+    r"sino\s+ka(?:\s+ba)?|ano\s+(?:ang\s+)?(?:pangalan\s+mo|alzona)|"
     # Croatian: "who are you", "what is your name", "introduce yourself"
     r"tko\s+si(?:\s+ti)?|kako\s+se\s+zove[sš]|predstavi\s+se|"
-    r"[sš]to\s+je\s+alzona)\b",
+    r"[sš]to\s+je\s+alzona|"
+    # Spanish: "who are you", "what is your name", "introduce yourself"
+    r"qui[eé]n\s+eres|c[oó]mo\s+te\s+llamas|pres[eé]ntate|"
+    r"qu[eé]\s+es\s+alzona)\b"
+    # Mandarin, which has no word boundaries to anchor on
+    r"|你是谁|你叫什么|介绍一下你自己|自我介绍",
     re.I,
 )
 
@@ -1071,6 +1078,39 @@ _IDENTITY_HR = (
 )
 
 _GREETED_HR = "Ja sam ALZONA, tvoja AI pratiteljica. Kako ti mogu pomoći?"
+
+# Spanish and Mandarin, written out for the same reason as the others: who she
+# is should not be improvised, and nobody at the stand can proofread a
+# generated sentence in a language they do not read.
+_IDENTITY_ES = (
+    "Soy ALZONA, tu compañera de inteligencia artificial — Android for "
+    "Learners as Zone and Oasis of National Archives. Pregúntame sobre la "
+    "historia de Filipinas o de Croacia, o canta y te acompañaré con la "
+    "segunda voz."
+)
+_GREETED_ES = "Soy ALZONA, tu compañera de inteligencia artificial. ¿En qué puedo ayudarte?"
+
+_IDENTITY_ZH = (
+    "我是 ALZONA，你的人工智能伙伴 — Android for Learners as Zone and Oasis of "
+    "National Archives。你可以问我菲律宾或克罗地亚的历史，也可以唱歌，我会和你合唱。"
+)
+_GREETED_ZH = "我是 ALZONA，你的人工智能伙伴。有什么可以帮你的吗？"
+
+_IDENTITY_FIL = (
+    "Ako si ALZONA, ang iyong AI na kasama — Android for Learners as Zone and "
+    "Oasis of National Archives. Tanungin mo ako tungkol sa kasaysayan ng "
+    "Pilipinas o Croatia, o kumanta ka at sasabayan kita."
+)
+_GREETED_FIL = "Ako si ALZONA, ang iyong AI na kasama. Paano kita matutulungan?"
+
+# Which introduction goes with which detected language. English is the default
+# and is not listed.
+_IDENTITY_BY_LANG = {
+    "Croatian": (_IDENTITY_HR, _GREETED_HR),
+    "Spanish": (_IDENTITY_ES, _GREETED_ES),
+    "Chinese": (_IDENTITY_ZH, _GREETED_ZH),
+    "Filipino": (_IDENTITY_FIL, _GREETED_FIL),
+}
 
 _IDENTITY = (
     "I'm ALZONA, your AI companion — Android for Learners as Zone and Oasis "
@@ -1088,11 +1128,12 @@ def identity_reply(text):
     t = (text or "").strip()
     if not t:
         return None
-    croatian = detect_reply_language(t) == "Croatian"
+    full, greeted = _IDENTITY_BY_LANG.get(detect_reply_language(t),
+                                          (_IDENTITY, _GREETED))
     if _WHO_ARE_YOU.search(t):
-        return _IDENTITY_HR if croatian else _IDENTITY
+        return full
     if _NAME_ONLY.match(t):
-        return _GREETED_HR if croatian else _GREETED
+        return greeted
     return None
 
 
@@ -1634,8 +1675,7 @@ def elevenlabs_voice(text, cache=False):
 _TTS_VOICES = {
     "English":  ("en-US", "en-US-Neural2-F"),
     "Filipino": ("fil-PH", "fil-PH-Standard-A"),
-    "Japanese": ("ja-JP", "ja-JP-Neural2-B"),
-    "Korean":   ("ko-KR", "ko-KR-Neural2-B"),
+    "Spanish":  ("es-ES", "es-ES-Neural2-A"),
     "Chinese":  ("cmn-CN", "cmn-CN-Wavenet-A"),
     # Only used by the Cloud TTS secondary. The primary Gemini voice is
     # multilingual and speaks Croatian from Croatian text without being told.
@@ -1712,6 +1752,8 @@ def _prerender_fixed_phrases():
     rendered on demand exactly as before.
     """
     phrases = [_IDENTITY, _GREETED, _IDENTITY_HR, _GREETED_HR,
+               _IDENTITY_ES, _GREETED_ES, _IDENTITY_ZH, _GREETED_ZH,
+               _IDENTITY_FIL, _GREETED_FIL,
                "Let me look at that coin.",
                "Hello! I'm listening. How can I help you?",
                "You're welcome! Just greet me again when you need me.",
@@ -2371,6 +2413,21 @@ _HR_MARKERS = {
 # is an English one. A wrong Croatian reading answers a visitor in a language
 # they may not read at all, which is worse than answering a Croat in English.
 
+# Spanish function words. Kept clear of Filipino, which borrowed heavily from
+# Spanish: "para", "pero", "porque", "como", "kasi" and the numbers all appear
+# in ordinary Tagalog, so none of them is here. What is left is the grammar
+# Filipino did NOT take — articles, pronouns, and the verb forms.
+_ES_MARKERS = {
+    "qué", "que", "quién", "quien", "cómo", "como", "dónde", "donde",
+    "cuándo", "cuando", "por", "favor", "gracias", "hola", "buenos", "buenas",
+    "días", "dias", "tardes", "noches", "eres", "está", "esta", "estás",
+    "estas", "soy", "son", "somos", "tiene", "tienes", "tengo", "hace",
+    "hacer", "puede", "puedes", "quiero", "quieres", "dime", "dígame",
+    "digame", "una", "unos", "unas", "los", "las", "del", "muy", "más",
+    "mas", "también", "tambien", "español", "espanol", "baile", "bailes",
+    "cultura", "historia", "gracias",
+}
+
 _FIL_MARKERS = {
     "ang", "ng", "mga", "ako", "ikaw", "siya", "kami", "tayo", "kayo", "sila",
     "ito", "iyan", "iyon", "ano", "sino", "saan", "kailan", "bakit", "paano",
@@ -2383,11 +2440,7 @@ _FIL_MARKERS = {
 def detect_reply_language(text):
     """Pin the reply language for cases the model tends to drift away from.
     Kana is checked before Han because Japanese also uses Han characters."""
-    if any('\u3040' <= c <= '\u30ff' for c in text):   # hiragana / katakana
-        return "Japanese"
-    if any('\uac00' <= c <= '\ud7af' for c in text):   # hangul
-        return "Korean"
-    if any('\u4e00' <= c <= '\u9fff' for c in text):   # han
+    if any('\u4e00' <= c <= '\u9fff' for c in text):   # han -> Mandarin
         return "Chinese"
     # Latin script: separate English from Filipino by function words. English
     # markers never appear in Filipino/regional languages, so an English hit is
@@ -2399,29 +2452,42 @@ def detect_reply_language(text):
     if any(c in text.lower() for c in "čćđšž"):
         return "Croatian"
 
-    words = re.findall(r"[a-zčćđšž]+", text.lower())
+    # ñ and the accented vowels are Spanish and not Croatian or Filipino.
+    if any(c in text.lower() for c in "ñ¿¡"):
+        return "Spanish"
+
+    words = re.findall(r"[a-zčćđšžáéíóúüñ]+", text.lower())
     if words:
         en = sum(w in _EN_MARKERS for w in words)
         fil = sum(w in _FIL_MARKERS for w in words)
         hr = sum(w in _HR_MARKERS for w in words)
+        es = sum(w in _ES_MARKERS for w in words)
+
+        # Spanish before English: several Spanish markers are spelled like
+        # English ones ("son", "una"), so it has to win on its own count
+        # rather than be crowded out by an incidental English word.
+        if es >= 2 and es > en and es > fil and es > hr:
+            return "Spanish"
+        if es and not en and not fil and not hr:
+            return "Spanish"
         # Croatian first when it clearly leads: someone writing without
         # diacritics ("sto je ovo") still deserves a Croatian answer.
         # One marker is enough when nothing English or Filipino is present.
         # Croatian sentences are often short — "Tko si ti?", "Hrvatska je
         # lijepa" — and requiring two of them missed exactly those.
-        if hr and not en and not fil:
+        if hr and not en and not fil and not es:
             return "Croatian"
-        if hr >= 2 and hr > en and hr > fil:
+        if hr >= 2 and hr > en and hr > fil and hr > es:
             return "Croatian"
-        if en >= 1 and en > fil and en > hr:
+        if en >= 1 and en > fil and en > hr and en > es:
             return "English"
         # Same courtesy as Croatian above: one unmistakable Filipino word with
         # nothing English or Croatian beside it is Filipino. "sino ka" — who
         # are you — carries exactly one and was falling through to no language
         # at all, which then answered a Filipino visitor in English.
-        if fil and not en and not hr:
+        if fil and not en and not hr and not es:
             return "Filipino"
-        if fil >= 2 and fil > en and fil > hr:
+        if fil >= 2 and fil > en and fil > hr and fil > es:
             return "Filipino"
     return None
 
@@ -2619,7 +2685,18 @@ def route_command(transcript):
 
     for name, path in DANCES.items():
         if name in t:
-            return {"mode": "video", "reply": f"Here is the {name.title()}, a Filipino folk dance.",
+            # The one line that introduces every Filipino dance, in whichever
+            # of the five it was asked in. A visitor who asks in Spanish and is
+            # answered in English has been told the robot speaks their language
+            # and then shown it does not.
+            intro = {
+                "Filipino": f"Narito ang {name.title()}, isang katutubong sayaw ng Pilipinas.",
+                "Spanish": f"Aquí está el {name.title()}, una danza folclórica filipina.",
+                "Croatian": f"Evo {name.title()}, filipinskog narodnog plesa.",
+                "Chinese": f"这是 {name.title()}，一种菲律宾民间舞蹈。",
+            }.get(detect_reply_language(transcript),
+                  f"Here is the {name.title()}, a Filipino folk dance.")
+            return {"mode": "video", "reply": intro,
                     "video_url": f"/media/{path}",
                     # The same thirty seconds every dance gets. A visitor
                     # watches a clip; the next one should not wait through a
