@@ -535,7 +535,30 @@ export default function VoiceRecorder({
       // Synthesis reports no progress events worth trusting, so hold the
       // window open on a timer and let it lapse the moment speaking stops.
       const holdOpen = setInterval(() => markSpeaking(), 250);
-      const done = () => { clearInterval(holdOpen); markSpeaking(); finishBusy(); };
+
+      // And give up holding it after however long this could possibly take.
+      //
+      // onend was the ONLY thing clearing that interval. A tab that will not
+      // let audio play, or a machine with no installed voice, never fires it —
+      // and then she counts as speaking for ever. Measured: the dance clip,
+      // which waits for her to stop, started at 15.25s, exactly its own
+      // give-up cap, on every single attempt. Everything that waits on her
+      // voice was waiting on a timer that had already failed.
+      //
+      // Speech runs at roughly fifteen characters a second; three seconds of
+      // margin covers a slow voice and a slow start.
+      const longestItCouldTake = (text.length / 15) * 1000 + 3000;
+      const giveUp = setTimeout(() => {
+        clearInterval(holdOpen);
+        finishBusy();
+      }, longestItCouldTake);
+
+      const done = () => {
+        clearInterval(holdOpen);
+        clearTimeout(giveUp);
+        markSpeaking();
+        finishBusy();
+      };
       u.onend = done;
       u.onerror = done;
       window.speechSynthesis.cancel();
