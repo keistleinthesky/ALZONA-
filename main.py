@@ -1128,13 +1128,113 @@ def identity_reply(text):
     t = (text or "").strip()
     if not t:
         return None
-    full, greeted = _IDENTITY_BY_LANG.get(detect_reply_language(t),
+    full, greeted = _IDENTITY_BY_LANG.get(current_language,
                                           (_IDENTITY, _GREETED))
     if _WHO_ARE_YOU.search(t):
         return full
     if _NAME_ONLY.match(t):
         return greeted
     return None
+
+
+# =========================================================
+# THE LANGUAGE SHE IS SPEAKING
+# =========================================================
+# A SETTING, not a guess. She answers in this language until someone asks her
+# to change, and a question asked in another language does not move her.
+#
+# Guessing per message was the obvious design and the wrong one. A visitor
+# asking in Spanish gets a Spanish answer, the next question comes out as a
+# Taglish mixture or a name the detector cannot place, and she switches back
+# mid-conversation. At a stand where several people take turns, she would drift
+# between languages with nobody having asked for it. Being asked is
+# unambiguous; guessing is not.
+#
+# The one thing that does NOT follow this is the dance descriptions, which are
+# always English by decision — see CROATIAN_DANCES.
+SPOKEN_LANGUAGES = ("English", "Filipino", "Spanish", "Chinese", "Croatian")
+
+current_language = "English"
+
+# What counts as asking. Deliberately an explicit REQUEST: the old version
+# matched the bare words "english", "hi" and "kamusta" anywhere in a sentence,
+# so "how do you say this in English?" silently changed the setting, and so did
+# a greeting.
+_LANG_REQUEST = (
+    r"(?:speak|talk|answer|reply|respond|say\s+it|switch|change)\s*"
+    r"(?:to\s+me\s+)?(?:in|to|into)?\s*"
+    r"|(?:magsalita|sumagot)\s+(?:ka\s+)?(?:sa|ng)\s*"
+    r"|(?:habla|responde|contesta)\s+(?:en|español)?\s*"
+    r"|(?:govori|odgovori)\s+(?:na)?\s*"
+    r"|(?:说|讲|用)\s*"
+)
+
+# Stems, not exact words. Croatian and Spanish inflect the language's name —
+# "govori na hrvatskOM", "en españOL" — and matching the dictionary form meant
+# a Croat asking in Croatian was not understood.
+_LANG_NAMES = {
+    "English": r"english|ingl[eé]s|engleski\w*",
+    "Filipino": r"filipino\w*|tagalog\w*|pilipino\w*",
+    "Spanish": r"spanish|espa[nñ]ol\w*|kastila\w*|[šs]panjolsk\w*",
+    "Chinese": r"chinese|mandarin\w*|mandar[ií]n|kinesk\w*",
+    "Croatian": r"croatian|hrvatsk\w*|croata",
+}
+
+_LANG_COMMAND = re.compile(
+    r"\b(?:" + _LANG_REQUEST + r")\s*(?P<lang>"
+    + "|".join(f"(?P<{k.lower()}>{v})" for k, v in _LANG_NAMES.items())
+    + r")\b",
+    re.I,
+)
+
+# Chinese and Japanese-style scripts have no word boundaries, so \b never
+# matches around them and the pattern above cannot see "请说中文" at all. These
+# are matched on their own, as whole phrases.
+_LANG_CJK = [
+    ("English", ("英语", "英文")),
+    ("Filipino", ("菲律宾语", "菲律賓語", "他加禄语")),
+    ("Spanish", ("西班牙语", "西班牙文")),
+    ("Chinese", ("中文", "普通话", "普通話", "汉语", "漢語")),
+    ("Croatian", ("克罗地亚语", "克羅地亞語")),
+]
+
+# The ask itself, in Chinese: "please speak", "use", "switch to".
+_LANG_CJK_ASK = ("说", "講", "讲", "用", "换成", "換成", "改成")
+
+# What she says when she changes, IN the language she is changing to — so the
+# confirmation itself demonstrates the switch worked.
+_LANG_ACK = {
+    "English": "Alright, I'll speak English from now on.",
+    "Filipino": "Sige, magsasalita na ako ng Filipino.",
+    "Spanish": "De acuerdo, hablaré en español a partir de ahora.",
+    "Chinese": "好的，我现在开始说中文。",
+    "Croatian": "U redu, od sada govorim hrvatski.",
+}
+
+
+def detect_language_request(text):
+    """The language being asked for, or None. Does not change anything."""
+    t = text or ""
+    m = _LANG_COMMAND.search(t)
+    if m:
+        for name in SPOKEN_LANGUAGES:
+            if m.group(name.lower()):
+                return name
+
+    # The same request written in Chinese. Both halves are required — the name
+    # of a language alone is a topic, not an instruction, in any script.
+    if any(a in t for a in _LANG_CJK_ASK):
+        for name, words in _LANG_CJK:
+            if any(w in t for w in words):
+                return name
+    return None
+
+
+def set_language(name):
+    """Change the language she answers in, and confirm it in that language."""
+    global current_language
+    current_language = name
+    return _LANG_ACK.get(name, _LANG_ACK["English"])
 
 
 def detect_reset_command(text):
@@ -1461,16 +1561,17 @@ def _croatian_dance(text):
 def _croatian_dance_reply(name, info, croatian=False):
     """Her answer: the sentence, and the video when there is one to show.
 
-    Asked in Croatian about a Croatian dance, she answers in Croatian. That is
-    the one case where replying in English would be most obviously wrong, and
-    it was: "Što je Linđo?" came back describing Dubrovnik in English.
+    The description is ENGLISH, always, whatever language she is currently
+    speaking. That is a decision, not an oversight: these sentences name places,
+    instruments and customs, and a translation of one is a new claim about
+    another country's heritage that nobody at the stand can check. The English
+    wording was written once and can be checked once.
 
-    Both versions are written out. A model asked to translate on the spot will
-    phrase it differently every time and occasionally get a fact wrong, and
-    nobody on the team can check a Croatian sentence live at a stand.
+    `croatian` is kept in the signature because callers pass it, and ignored.
+    The Croatian text stays in the table for whenever a native speaker has read
+    it and it can be turned on deliberately.
     """
-    text = info.get("text_hr") if croatian else None
-    out = {"mode": "video", "reply": text or info["text"]}
+    out = {"mode": "video", "reply": info["text"]}
     video = info.get("video", "")
     if not video:
         # No footage yet. Say so plainly rather than leaving a visitor waiting
@@ -1758,10 +1859,11 @@ def _prerender_fixed_phrases():
                "Hello! I'm listening. How can I help you?",
                "You're welcome! Just greet me again when you need me.",
                "Which word would you like me to write in Baybayin?"]
+    # English only: the Croatian descriptions are in the table but not spoken,
+    # so rendering them would be a minute of startup spent on audio nothing
+    # plays.
     for info in CROATIAN_DANCES.values():
         phrases.append(info["text"])
-        if info.get("text_hr"):
-            phrases.append(info["text_hr"])
 
     done = 0
     for text in phrases:
@@ -2627,6 +2729,11 @@ def route_command(transcript):
 
     # Answer to her own name before anything else looks at the text. Left to
     # the knowledge model, "alzona" came back as an answer about the surname.
+    # "speak in Spanish" — a setting, handled before anything tries to answer.
+    asked_for = detect_language_request(transcript)
+    if asked_for:
+        return {"mode": "chat", "reply": set_language(asked_for)}
+
     said_hello = identity_reply(transcript)
     if said_hello:
         return {"mode": "chat", "reply": said_hello}
@@ -2685,18 +2792,10 @@ def route_command(transcript):
 
     for name, path in DANCES.items():
         if name in t:
-            # The one line that introduces every Filipino dance, in whichever
-            # of the five it was asked in. A visitor who asks in Spanish and is
-            # answered in English has been told the robot speaks their language
-            # and then shown it does not.
-            intro = {
-                "Filipino": f"Narito ang {name.title()}, isang katutubong sayaw ng Pilipinas.",
-                "Spanish": f"Aquí está el {name.title()}, una danza folclórica filipina.",
-                "Croatian": f"Evo {name.title()}, filipinskog narodnog plesa.",
-                "Chinese": f"这是 {name.title()}，一种菲律宾民间舞蹈。",
-            }.get(detect_reply_language(transcript),
-                  f"Here is the {name.title()}, a Filipino folk dance.")
-            return {"mode": "video", "reply": intro,
+            # English, like every dance description — see
+            # _croatian_dance_reply for why.
+            return {"mode": "video",
+                    "reply": f"Here is the {name.title()}, a Filipino folk dance.",
                     "video_url": f"/media/{path}",
                     # The same thirty seconds every dance gets. A visitor
                     # watches a clip; the next one should not wait through a
@@ -2776,16 +2875,13 @@ def route_command(transcript):
 
     try:
         context = retrieve_knowledge(transcript)
-        lang = detect_reply_language(transcript)
+        # The language she was ASKED to speak, not the one this question
+        # happened to be in. A visitor may ask in Taglish, or use a name the
+        # detector cannot place; neither should move her.
         lang_rule = (
-            f"Reply ONLY in {lang}."
-            if lang else
-            "Reply in the EXACT same language, script, and dialect the user used "
-            "in their CURRENT message — including romanized/phonetic input, which "
-            "you must treat AS that language. Never translate, transliterate, "
-            "gloss, or explain the user's own words back to them; just answer as "
-            "a natural conversation partner. Do NOT switch languages based on "
-            "earlier turns."
+            f"Reply ONLY in {current_language}, whatever language the question "
+            f"is written in. Do not translate the question back, and do not "
+            f"switch languages on your own."
         )
 
         parts = []
