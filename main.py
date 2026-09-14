@@ -2072,15 +2072,35 @@ Decide FIRST whether the coin is genuine, then report the rest.
 5. denomination - the currency and face value
 6. featured - the person, animal, or symbol shown on it
 7. significance - its historical and cultural significance
+8. spoken - what ALZONA says OUT LOUD, which is NOT any of the above.
+
+Fields 1-7 are printed on a screen the person is already looking at, so
+reading them aloud tells them nothing they cannot see. `spoken` is the part
+they can only get by asking:
+
+- WHEN it was struck: the year on the coin, and the mint if it is marked.
+  Say plainly that the date is not legible if it is not — a made-up year on a
+  real coin is worse than admitting the picture is poor.
+- Then ONE thing genuinely worth knowing that fields 1-7 do not already say:
+  why the design changed that year, what the mint mark means, what it would
+  have bought, how long the series ran, an engraving detail easy to miss.
+- Never repeat the country, the denomination, the person shown, or whether it
+  is genuine. Those are already on the screen.
+- If the verdict is "fake", a minting date is meaningless — the coin was not
+  struck by any mint. Say what year it CLAIMS instead, and one thing a real
+  one of that year would have that this does not.
 
 Rules:
-- Reply with ONE SENTENCE per field. Never more than one sentence.
-- Keep each sentence under 20 words, natural and warm, not a bare label.
+- Reply with ONE SENTENCE per field for fields 1-7. Never more than one.
+- Keep each of those sentences under 20 words, natural and warm, not a bare
+  label.
+- `spoken` may be two sentences: the date, then the interesting thing. Keep it
+  under 45 words and say it as you would to someone holding the coin.
 - If a detail is genuinely not visible (worn, blurred, face-down), say so in
   that field's sentence instead of guessing.
 - If the image contains NO coin at all, reply with exactly: NO_COIN
 - Return ONLY a JSON object with the keys: verdict, authenticity,
-  other_countries, country, denomination, featured, significance.
+  other_countries, country, denomination, featured, significance, spoken.
   No markdown, no code fence."""
 
 
@@ -2135,8 +2155,18 @@ def identify_coin(jpeg_bytes):
             fields.append({"key": key, "label": label, "emoji": emoji,
                            "text": _first_sentence(data.get(key, ""),
                                                    sentences=room)})
-        # One spoken line covering the panel, so the voice matches the screen.
-        spoken = " ".join(f["text"] for f in fields if f["text"])
+        # What she SAYS, which is deliberately not what the panel shows.
+        #
+        # Reading the six rows aloud told the person in front of her exactly
+        # what was already on the screen they were looking at. The date it was
+        # struck and a fact worth knowing are the parts they can only get by
+        # asking her.
+        spoken = _first_sentence(data.get("spoken", ""), max_words=24,
+                                 sentences=2)
+        if not spoken:
+            # No spoken line came back. The panel is still right, so say the
+            # one thing that is not on it rather than nothing at all.
+            spoken = "I could not make out the date on this one."
         return {"ok": True, "verdict": verdict,
                 "fields": fields, "spoken": spoken}
     except Exception as e:
