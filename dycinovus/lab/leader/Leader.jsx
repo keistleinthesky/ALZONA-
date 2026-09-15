@@ -99,6 +99,9 @@ export default function Leader({
   const [status, setStatus] = useState('Idle')
   const [playhead, setPlayhead] = useState(0)
   const [holding, setHolding] = useState(false)
+  // Which line is showing, purely for the readout below. The panel already
+  // re-renders every frame from `playhead`, so this costs nothing extra.
+  const [lineNo, setLineNo] = useState(0)
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
 
@@ -245,6 +248,7 @@ export default function Leader({
     setListening(false)
     onActiveChange?.(false)      // recognition may listen again
     lineRef.current = -1
+    setLineNo(0)
     onLyricRef.current?.(null)
     holdingRef.current = false
     setHolding(false)
@@ -405,6 +409,7 @@ export default function Leader({
 
             if (idx !== lineRef.current) {
               lineRef.current = idx
+              setLineNo(idx + 1)
               onLyricRef.current?.(idx >= 0 ? words[idx] : null)
             }
           }
@@ -632,6 +637,17 @@ export default function Leader({
       </button>
 
       <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>
+
+      {/* Where the recording is, and which line that is.
+          This is how a line that comes up at the wrong moment gets fixed:
+          sing, watch the number at the instant the line actually starts, and
+          put that number in front of that line in lyrics_en.txt. */}
+      {listening && (
+        <p className="mt-1 font-mono text-[11px] tabular-nums text-white/40">
+          {(playhead + (manifest?.lead_in ?? 0)).toFixed(2)}s
+          {lineNo > 0 ? `  ·  line ${lineNo}` : ''}
+        </p>
+      )}
       <p className="mt-1 text-[10px] text-white/30">
         Use headphones — otherwise the mic hears the harmony and tracks that instead of you.
       </p>
