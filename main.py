@@ -879,6 +879,21 @@ def open_camera():
     return None
 
 
+# A capture handle outlives the camera it was opened on. After the laptop
+# sleeps and wakes, the USB device is enumerated afresh but DirectShow keeps
+# answering read() with True and hands back a black frame with a band of noise
+# along the top - forever, until something reopens it. Nothing noticed, because
+# a returned frame counts as success: the preview just showed static, and the
+# only cure was restarting the backend by hand.
+#
+# A dark room reads far above this. 0.2 of 255 is the sensor returning nothing
+# at all, and requiring a long unbroken run of them means a hand over the lens
+# or a light switched off never costs us a reopen.
+DEAD_FRAME_MEAN = 2.0        # brightness at or under this is no picture
+DEAD_FRAME_RUN = 150         # about five seconds at thirty frames a second
+REOPEN_COOLDOWN = 20.0       # seconds to wait before trying again
+
+
 def face_detection():
 
     global face_state, running, age_result
@@ -896,11 +911,48 @@ def face_detection():
     face_seen_start = None
     age_checked = False
 
+    dead_frames = 0
+    last_reopen = 0.0
+
     while running:
 
         ret, frame = webcam.read()
+
         if not ret:
-            print("WARNING: Failed to capture frame from webcam")
+            dead_frames += 1
+            # Don't spin: a camera that has gone away fails instantly, and a
+            # tight retry loop burns a core for nothing.
+            time.sleep(0.05)
+
+        elif float(frame[::8, ::8].mean()) <= DEAD_FRAME_MEAN:
+            # Reads fine, shows nothing. Every eighth pixel is enough to tell.
+            dead_frames += 1
+
+        else:
+            dead_frames = 0
+
+        if dead_frames >= DEAD_FRAME_RUN and \
+                time.time() - last_reopen > REOPEN_COOLDOWN:
+            print("Camera has been blank for a while - reopening it.")
+            last_reopen = time.time()
+            dead_frames = 0
+
+            try:
+                webcam.release()
+            except Exception:
+                pass
+
+            fresh = open_camera()
+
+            if fresh is not None:
+                webcam = fresh
+            else:
+                print("Camera would not reopen - will try again shortly.")
+                time.sleep(2)
+
+            continue
+
+        if not ret:
             continue
 
         try:
