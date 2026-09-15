@@ -130,6 +130,11 @@ export default function Leader({
   // Through a ref: the animation frame is created once per take and would
   // otherwise hold the callback the page had when singing started.
   const onLyricRef = useRef(onLyric)
+  // A stop is decided in the animation frame but carried out on a timer, so
+  // the branch keeps being true until teardown actually runs. Without this
+  // the reason was written to the log sixty times a second - thirty copies of
+  // the same line, which buries whatever came before it.
+  const stoppingRef = useRef(false)
   // The words. Held in a ref rather than state on purpose: nothing in this
   // panel draws them, and start() is memoised without them, so a loop reading
   // state would capture whatever they were when the take began — usually
@@ -270,11 +275,24 @@ export default function Leader({
 
   const start = useCallback(async () => {
     try {
+      // Ask for the microphone BEFORE taking it.
+      //
+      // This used to open the mic first and announce it afterwards, so for
+      // the length of a getUserMedia call the recogniser still held the
+      // device - and on the take in the log it never let go at all: the
+      // stream carried silence for twelve seconds and the harmony stopped
+      // saying nobody sang. Announcing first gives recognition the chance to
+      // abort, and the pause below is long enough for it to actually happen.
+      onActiveChange?.(true)
+      setStatus('Taking the microphone…')
+      await new Promise((r) => setTimeout(r, 250))
+
       setStatus('Opening the microphone…')
       const ctx = await openMic()
       startedAtRef.current = ctx.currentTime
       lastVoicedRef.current = ctx.currentTime
       hasSungRef.current = false
+      stoppingRef.current = false
       lineRef.current = -1
       playbackStartedRef.current = 0
       holdingRef.current = false
@@ -332,7 +350,6 @@ export default function Leader({
         setStatus(`Count-in… (${bpm} BPM)`)
       }
       setListening(true)
-      onActiveChange?.(true)     // recognition steps aside
       say(baseUrl, `start parts=${partsRef.current.join('+')} `
         + `lead_in=${cacheRef.current.manifest?.lead_in ?? '?'}`)
 
@@ -422,9 +439,18 @@ export default function Leader({
               player.hold()
               setHold(true)
               setStatus('Holding for you…')
-            } else if (waitedTooLong) {
+            } else if (waitedTooLong && !stoppingRef.current) {
+              stoppingRef.current = true
+              // The input level distinguishes the two ways this happens: a
+              // level of zero means something else has the microphone, and a
+              // small non-zero one means the singer is too far from it.
+              let peak = 0
+              for (let k = 0; k < buffer.length; k += 8) {
+                const v = Math.abs(buffer[k])
+                if (v > peak) peak = v
+              }
               say(baseUrl, `STOP nobody-sang after=${NO_SHOW_STOP}s `
-                + `at=${head.toFixed(2)}s`)
+                + `at=${head.toFixed(2)}s peak=${peak.toFixed(4)}`)
               setStatus("I didn't hear any singing — stopped.")
               player.fadeOutAndStop(0.6)
               setTimeout(() => teardown(), 700)
@@ -436,7 +462,8 @@ export default function Leader({
               player.resume()
               setHold(false)
               setStatus('Carrying on.')
-            } else if (quiet > SILENCE_END) {
+            } else if (quiet > SILENCE_END && !stoppingRef.current) {
+              stoppingRef.current = true
               say(baseUrl, `STOP silence quiet=${quiet.toFixed(1)}s `
                 + `at=${player.playhead.toFixed(2)}s`)
               setStatus('Finished — you stopped singing.')
@@ -453,7 +480,7 @@ export default function Leader({
       setStatus(`Could not start: ${err.message}`)
       teardown()
     }
-  }, [baseUrl, openMic, teardown])
+  }, [baseUrl, onActiveChange, openMic, teardown])
 
   /**
    * Begin once a command's selection has actually been applied.

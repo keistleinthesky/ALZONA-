@@ -474,7 +474,29 @@ export default function VoiceRecorder({
   };
 
   const stopRecording = useCallback(() => {
-    if (recognitionRef.current) recognitionRef.current.stop();
+    const r = recognitionRef.current;
+    if (!r) return;
+
+    // abort, not stop.
+    //
+    // stop() asks the recogniser to finish the sentence it is on, and with
+    // continuous recognition and audio still arriving it will sit there
+    // holding the microphone rather than ending. Measured from the log: the
+    // harmony started at 11:55:20 with recognition already running since
+    // 11:55:16, this ran, and rec was STILL true at 11:55:35 — so the
+    // harmony's own stream carried silence for the whole take and it stopped
+    // at twelve seconds reporting that nobody sang. Somebody was singing.
+    //
+    // abort() ends the session at once and releases the device, which is the
+    // whole point of being asked to hand it over.
+    recognitionRef.current = null;
+    try { if (r.abort) r.abort(); else r.stop(); } catch { /* already gone */ }
+
+    // Don't wait for onend to tidy up. If it never arrives — and an aborted
+    // session is exactly when it might not — busy stays true and the poll
+    // never listens again once the singing is over.
+    setRecording(false);
+    busyRef.current = false;
   }, []);
 
   // Hand the microphone over to the singing panel. Nothing here waits for
