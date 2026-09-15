@@ -1636,6 +1636,20 @@ DANCES = {
 # Singkil — the Maranao royal dance from Lanao, from the Darangen epic.
 SINGKIL_VIDEO = "videos/singkil.mp4"
 
+# Kept up here, not written inline where it is returned, so the startup
+# render below speaks the SAME string. Two copies would drift, and a drifted
+# copy is a cache miss: rendered at startup, then synthesised again on the
+# floor because a comma moved.
+_FESTIVAL_SPOKEN = ("For a festival, watch the Singkil — the Maranao "
+                    "royal dance from Lanao, from the Darangen epic, "
+                    "danced between crossing bamboo poles. It is the "
+                    "showpiece of Philippine festival stages.")
+
+
+def _dance_spoken(name):
+    """What she says about one Filipino dance — the same wording every time."""
+    return f"Here is the {name.title()}, a Filipino folk dance."
+
 # Countries whose own festivals deserve their own answer. Croatia matters most:
 # it is ALZONA's other specialty, so "Croatian dance festivals" is a question
 # she is expected to actually answer, not a cue to recommend a Filipino dance.
@@ -1913,6 +1927,16 @@ def _prerender_fixed_phrases():
                "Hello! I'm listening. How can I help you?",
                "You're welcome! Just greet me again when you need me.",
                "Which word would you like me to write in Baybayin?"]
+    # The festival answer is the slowest of the lot to synthesise — four
+    # sentences, measured at 8.5 seconds cold against 1.3 warm — and it is
+    # asked constantly, since "what dance is performed at a festival" is the
+    # obvious question to put to her. It was never on this list.
+    phrases.append(_FESTIVAL_SPOKEN)
+    # dict.fromkeys: carinosa is in the table twice, spelled both ways, and
+    # both spellings say the same sentence.
+    for _name in dict.fromkeys(_dance_spoken(n) for n in DANCES):
+        phrases.append(_name)
+
     # English only: the Croatian descriptions are in the table but not spoken,
     # so rendering them would be a minute of startup spent on audio nothing
     # plays.
@@ -2927,7 +2951,7 @@ def route_command(transcript, asked_by=""):
             # English, like every dance description — see
             # _croatian_dance_reply for why.
             return {"mode": "video",
-                    "reply": f"Here is the {name.title()}, a Filipino folk dance.",
+                    "reply": _dance_spoken(name),
                     "video_url": f"/media/{path}",
                     # The same thirty seconds every dance gets. A visitor
                     # watches a clip; the next one should not wait through a
@@ -2945,10 +2969,7 @@ def route_command(transcript, asked_by=""):
     # she recommends it as the dance to watch and never implies otherwise.
     if wants_festival_dance(t):
         return {"mode": "video",
-                "reply": ("For a festival, watch the Singkil — the Maranao "
-                          "royal dance from Lanao, from the Darangen epic, "
-                          "danced between crossing bamboo poles. It is the "
-                          "showpiece of Philippine festival stages."),
+                "reply": _FESTIVAL_SPOKEN,
                 "video_url": f"/media/{SINGKIL_VIDEO}",
                 "video_start": 0, "video_seconds": CLIP_SECONDS}
     # if ("baybayin" in t or "baybay" in t) and any(w in t for w in ["teach", "learn", "video", "tutorial", "lesson"]):
