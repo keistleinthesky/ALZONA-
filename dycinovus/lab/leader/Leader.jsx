@@ -45,6 +45,18 @@ const QUIET_WAIT_MAX_MS = 15000
 // the singing. A short lead puts the words there just before they are wanted.
 const LYRIC_LEAD = 0.4
 
+// Every take writes what it did to static/sing_debug.log through the backend.
+// The singing runs entirely in the browser, so without this there is no record
+// afterwards of why a take stopped — and "it stopped singing" is not a thing
+// anyone can answer from the room.
+function say(baseUrl, line) {
+  try {
+    const fd = new FormData()
+    fd.append('line', `HARMONY ${line}`)
+    fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
+  } catch { /* telemetry must never break a take */ }
+}
+
 const SILENCE_PAUSE = 1.2
 // Only after this much continuous silence do we call the take finished and
 // release the microphone.
@@ -296,7 +308,11 @@ export default function Leader({
         const { endsAt } = countIn(ctx, bpm, 4, ctx.currentTime + refLen + 0.25)
 
         const player = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
-          onEnded: () => { setStatus('Harmony finished.'); teardown() },
+          onEnded: () => {
+            say(baseUrl, 'STOP recording-ended')
+            setStatus('Harmony finished.')
+            teardown()
+          },
         })
         playerRef.current = player
 
@@ -317,6 +333,8 @@ export default function Leader({
       }
       setListening(true)
       onActiveChange?.(true)     // recognition steps aside
+      say(baseUrl, `start parts=${partsRef.current.join('+')} `
+        + `lead_in=${cacheRef.current.manifest?.lead_in ?? '?'}`)
 
       const tick = () => {
         const buffer = bufRef.current
@@ -394,15 +412,19 @@ export default function Leader({
 
             if (hasSungRef.current && quiet > SILENCE_PAUSE) {
               // Stopped mid-song — wait here rather than carrying on alone.
+              say(baseUrl, `pause at=${head.toFixed(2)}s quiet=${quiet.toFixed(2)}s`)
               player.hold()
               setHold(true)
               setStatus('Paused — sing again to carry on.')
             } else if (atBoundary && sustaining) {
               // Still singing, but holding a note past the end of the phrase.
+              say(baseUrl, `hold-at-boundary at=${head.toFixed(2)}s`)
               player.hold()
               setHold(true)
               setStatus('Holding for you…')
             } else if (waitedTooLong) {
+              say(baseUrl, `STOP nobody-sang after=${NO_SHOW_STOP}s `
+                + `at=${head.toFixed(2)}s`)
               setStatus("I didn't hear any singing — stopped.")
               player.fadeOutAndStop(0.6)
               setTimeout(() => teardown(), 700)
@@ -410,10 +432,13 @@ export default function Leader({
           } else if (holdingRef.current) {
             if (hz > 0) {
               // Any note brings the harmony straight back in.
+              say(baseUrl, `resume at=${player.playhead.toFixed(2)}s hz=${hz.toFixed(1)}`)
               player.resume()
               setHold(false)
               setStatus('Carrying on.')
             } else if (quiet > SILENCE_END) {
+              say(baseUrl, `STOP silence quiet=${quiet.toFixed(1)}s `
+                + `at=${player.playhead.toFixed(2)}s`)
               setStatus('Finished — you stopped singing.')
               setTimeout(() => teardown(), 200)
             }
@@ -470,9 +495,10 @@ export default function Leader({
   }, [parts, listening, start, teardown])
 
   const stop = useCallback(() => {
+    say(baseUrl, 'STOP button')
     teardown()
     setStatus('Stopped.')
-  }, [teardown])
+  }, [baseUrl, teardown])
 
   useEffect(() => () => teardown(), [teardown])
 
