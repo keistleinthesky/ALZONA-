@@ -38,6 +38,13 @@ import {
 const QUIET_POLL_MS = 120
 const QUIET_WAIT_MAX_MS = 15000
 
+// How far ahead of a line being sung its words appear.
+//
+// Showing a line exactly as it starts is too late to be read: by the time the
+// eye has found it the phrase is under way, which reads as the screen lagging
+// the singing. A short lead puts the words there just before they are wanted.
+const LYRIC_LEAD = 0.4
+
 const SILENCE_PAUSE = 1.2
 // Only after this much continuous silence do we call the take finished and
 // release the microphone.
@@ -170,12 +177,24 @@ export default function Leader({
     ])
       .then(([fil, en]) => {
         if (!alive || !fil?.lines?.length) return
+        // A line may carry its own start time in seconds — "12.62 Land dear
+        // and holy" — which overrides the time measured for the Filipino line
+        // it sits against. That is the way to fix a line that comes up at the
+        // wrong moment without touching anything else.
         const english = (en || '')
           .split('\n')
           .map((x) => x.trim())
           .filter(Boolean)
+          .map((raw) => {
+            const m = raw.match(/^(\d+(?:\.\d+)?)\s+(.+)$/)
+            return m ? { at: parseFloat(m[1]), text: m[2] } : { at: null, text: raw }
+          })
+
         lyricsRef.current = fil.lines.map((l, i) => ({
-          t: l.t, end: l.end, fil: l.text, en: english[i] ?? '',
+          t: english[i]?.at ?? l.t,
+          end: l.end,
+          fil: l.text,
+          en: english[i]?.text ?? '',
         }))
       })
       .catch(() => {})
@@ -331,10 +350,24 @@ export default function Leader({
           const words = lyricsRef.current
           if (words) {
             const at = head + (cacheRef.current.manifest?.lead_in ?? 0)
+
+            // The latest line whose turn has come, rather than the line whose
+            // window contains this instant.
+            //
+            // Matching the window meant the words vanished in the rests
+            // BETWEEN lines - a third of a second of nothing, twenty times a
+            // song - and only appeared once a line was already being sung.
+            // Both read as the screen running late. This holds a line until
+            // the next one is due, and brings each one up a little early.
             let idx = -1
             for (let k = 0; k < words.length; k += 1) {
-              if (at >= words[k].t && at < words[k].end) { idx = k; break }
+              if (at >= words[k].t - LYRIC_LEAD) idx = k
             }
+
+            // Clear once the singing is over, rather than leaving the closing
+            // line on screen for as long as the panel stays open.
+            if (idx === words.length - 1 && at > words[idx].end + 1.5) idx = -1
+
             if (idx !== lineRef.current) {
               lineRef.current = idx
               onLyricRef.current?.(idx >= 0 ? words[idx] : null)
