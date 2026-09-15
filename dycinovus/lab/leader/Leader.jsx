@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { detectPitch, hzFromMidi, midiFromHz, noteLabel } from '../src/pitch'
+import { detectPitch, midiFromHz, noteLabel } from '../src/pitch'
 import { hearingSelf, whenQuiet } from '../src/selfVoice'
-import {
-  MIN_DISTINCT_TO_MATCH,
-  counterpart,
-  framesToNotes,
-  identifyPart,
-} from '../src/scoreMatch'
 import HarmonyChart, { PART_COLORS } from './HarmonyChart'
 import {
   HarmonyPlayer,
@@ -17,19 +11,22 @@ import {
 } from './harmonyPlayer'
 
 // =============================================================================
-// LUPANG HINIRANG — sing-back and recorded SATB harmony
+// LUPANG HINIRANG — recorded SATB harmony, with the English words on screen
 // =============================================================================
-// Two different jobs, two different engines:
+// One job now. Harmonise plays the real recorded voices: a fixed piece needs
+// the actual written parts, and a synth guessing intervals produces parallel
+// motion that is musically wrong however accurate the pitch tracking is.
 //
-//   Sing back  - synthesised. It has to reproduce whatever you just sang, in
-//                whatever key you sang it, so there is nothing to pre-record.
-//   Harmonise  - real recorded voices. A fixed piece needs the actual written
-//                parts; a synth guessing intervals produces parallel motion
-//                that is musically wrong no matter how accurate the pitch
-//                tracking is.
+// Sing back used to live here too and has been removed from this console. The
+// consoles on 5173 and 5174 still have it; they share a different panel.
 //
-// Pitch tracking runs in the browser either way, so the mic feeds the display
-// and the sync logic with no upload round-trip.
+// The English lines are shown as she sings the Filipino ones, so a visitor who
+// does not speak Filipino can follow what the anthem is saying. She still
+// sings it in Filipino — RA 8491 is about how the anthem is SUNG, and this
+// only puts a translation on the screen beside it.
+//
+// Pitch tracking runs in the browser, so the mic feeds the display and the
+// sync logic with no upload round-trip.
 
 // Stop singing for this long and the recording WAITS for you. Set above a
 // normal breath (~0.5s) so ordinary phrasing doesn't pause it, but low enough
@@ -40,16 +37,6 @@ import {
 // wait for ever on a sentence that already ended.
 const QUIET_POLL_MS = 120
 const QUIET_WAIT_MAX_MS = 15000
-
-// The only two lines a singer realistically takes. Tenor and bass exist as
-// recordings and can be CHOSEN in Harmonise, but nobody sings the melody in
-// them, so matching a voice against them would only invite a wrong answer.
-const SINGER_PARTS = ['soprano', 'alto']
-
-// How much recent singing to test against the score. Long enough for a
-// phrase, short enough that one stray sound ages out instead of poisoning
-// every later attempt.
-const CONTOUR_MEMORY = 12
 
 const SILENCE_PAUSE = 1.2
 // Only after this much continuous silence do we call the take finished and
@@ -85,7 +72,6 @@ export default function Leader({
   onActiveChange,
 } = {}) {
   const [listening, setListening] = useState(false)
-  const [mode, setMode] = useState('harmonize')
   const [parts, setParts] = useState(['alto'])
   const [pitch, setPitch] = useState({ hz: 0, clarity: 0 })
   const [status, setStatus] = useState('Idle')
@@ -93,24 +79,19 @@ export default function Leader({
   const [holding, setHolding] = useState(false)
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
-  // The line ALZONA is singing in Sing back. Used to DRAW her on the
-  // chart; deliberately never written on screen as a word — which part
-  // either of you is on is not something the audience needs told.
-  const [autoPart, setAutoPart] = useState(null)
+  // The English words, and which line of them is being sung right now.
+  const [lyrics, setLyrics] = useState(null)
+  const [lineIndex, setLineIndex] = useState(-1)
 
   // Set when a command arrives, cleared the moment it has been acted on.
   const autoStartRef = useRef(false)
-  const matchRef = useRef(null)      // where in the song she found you
-  const joiningRef = useRef(false)   // a join is already under way
   const ctxRef = useRef(null)
   const streamRef = useRef(null)
   const rafRef = useRef(null)
   const bufRef = useRef(null)
   const analyserRef = useRef(null)
-  const voiceRef = useRef(null)       // synth, sing-back only
   const playerRef = useRef(null)      // recorded harmony
   const cacheRef = useRef({})         // decoded buffers survive restarts
-  const contourRef = useRef([])       // [{t, hz}] captured for sing-back
   const startedAtRef = useRef(0)
   const lastVoicedRef = useRef(0)
   // The auto-stop must not arm until the singer has actually sung something.
@@ -123,16 +104,26 @@ export default function Leader({
   const holdingRef = useRef(false)
   const boundsRef = useRef([])
   const sustainRef = useRef({ midi: null, since: 0 })
-  const modeRef = useRef(mode)
   const partsRef = useRef(parts)
+  // Which lyric line is on screen. Read inside the animation frame, which
+  // would otherwise set state sixty times a second to say nothing changed.
+  const lineRef = useRef(-1)
 
-  useEffect(() => { modeRef.current = mode }, [mode])
   useEffect(() => { partsRef.current = parts }, [parts])
 
   // A spoken command ("harmonize with me in tenor and bass") arms the panel.
   useEffect(() => {
     if (!armed) return
-    setMode(armed.mode === 'harmonize' ? 'harmonize' : 'imitate')
+
+    // Sing back is gone from this console, so a command asking for it is not
+    // quietly turned into a harmony — say what happened instead of starting
+    // something nobody asked for.
+    if (armed.mode && armed.mode !== 'harmonize') {
+      setStatus('Sing back has been removed here — say “harmonise with me”.')
+      onClear?.()
+      return
+    }
+
     if (armed.parts?.length) setParts(armed.parts)
     else if (armed.part) setParts([armed.part])
     // "harmonize me in alto" is already the instruction to begin. Arming the
@@ -152,6 +143,12 @@ export default function Leader({
     fetch(`${baseUrl}/media/harmony/contours.json`)
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => { if (alive && c) { setContours(c); cacheRef.current.contours = c } })
+      .catch(() => {})
+    // The English lines, on the same clock as the recording. Missing simply
+    // means no words on screen: the harmony itself does not depend on them.
+    fetch(`${baseUrl}/media/harmony/lyrics_en.json`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((l) => { if (alive && l?.lines?.length) setLyrics(l.lines) })
       .catch(() => {})
     return () => { alive = false }
   }, [baseUrl])
@@ -176,30 +173,18 @@ export default function Leader({
       playerRef.current.fadeOutAndStop(0.4)
       playerRef.current = null
     }
-    if (voiceRef.current) {
-      const v = voiceRef.current
-      const ctx = ctxRef.current
-      if (ctx) v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.05)
-      voiceRef.current = null
-      setTimeout(() => v.stop(), 300)
-    }
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop())
       streamRef.current = null
     }
     setListening(false)
     onActiveChange?.(false)      // recognition may listen again
+    lineRef.current = -1
+    setLineIndex(-1)
     holdingRef.current = false
     setHolding(false)
     setPitch({ hz: 0, clarity: 0 })
   }, [])
-
-  // ---- sing-back (synth) ----------------------------------------------------
-  // The synthesised sing-back voice that used to live here is gone. Sing
-  // back no longer copies notes at an oscillator after the fact — she
-  // recognises the line being sung and answers WHILE it is sung, with the
-  // recorded other part.
-
 
   // ---- shared mic setup -----------------------------------------------------
   const openMic = useCallback(async () => {
@@ -227,19 +212,17 @@ export default function Leader({
     try {
       setStatus('Opening the microphone…')
       const ctx = await openMic()
-      contourRef.current = []
       startedAtRef.current = ctx.currentTime
       lastVoicedRef.current = ctx.currentTime
       hasSungRef.current = false
-      matchRef.current = null
-      joiningRef.current = false
-      setAutoPart(null)
+      lineRef.current = -1
+      setLineIndex(-1)
       playbackStartedRef.current = 0
       holdingRef.current = false
       sustainRef.current = { midi: null, since: 0 }
       setPlayhead(0)
 
-      if (modeRef.current === 'harmonize') {
+      {
         setStatus('Loading the harmony parts…')
         const chosen = partsRef.current
         const loaded = await loadHarmony(baseUrl, ctx, chosen, cacheRef.current)
@@ -284,19 +267,6 @@ export default function Leader({
           setStatus(`Harmonising in ${chosen.join(' + ')} — sing!`)
         }, waitMs)
         setStatus(`Count-in… (${bpm} BPM)`)
-      } else {
-        // Sing back needs BOTH lines ready before a note is sung: the whole
-        // point is that she answers the moment she recognises where you are,
-        // and fetching audio at that moment would miss the entrance.
-        setStatus('Listening — just start singing.')
-        const loaded = await loadHarmony(baseUrl, ctx, SINGER_PARTS, cacheRef.current)
-        cacheRef.current = loaded
-        setManifest(loaded.manifest)
-        setContours(loaded.contours)
-        boundsRef.current = loaded.manifest.phrase_boundaries ?? []
-        playerRef.current = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
-          onEnded: () => { setStatus('Finished.'); teardown() },
-        })
       }
       setListening(true)
       onActiveChange?.(true)     // recognition steps aside
@@ -312,15 +282,6 @@ export default function Leader({
           setPitch({ hz, clarity })
           lastVoicedRef.current = now
           hasSungRef.current = true
-          const at = now - startedAtRef.current
-          contourRef.current.push({ t: at, hz })
-          // Matching on the WHOLE take meant one stray sound poisoned every
-          // later attempt; only recent singing is kept.
-          const cutoff = at - CONTOUR_MEMORY
-          while (contourRef.current.length && contourRef.current[0].t < cutoff) {
-            contourRef.current.shift()
-          }
-
           // Track how long the current note has been held — used to decide
           // whether the singer is sustaining through a phrase end.
           const midi = Math.round(midiFromHz(hz))
@@ -332,66 +293,25 @@ export default function Leader({
           sustainRef.current = { midi: null, since: 0 }
         }
 
-        // ---- Sing back: work out where they are, then come in ----------
-        if (player && modeRef.current === 'imitate'
-            && !matchRef.current && !joiningRef.current) {
-          const sung = framesToNotes(contourRef.current)
-          const cs = cacheRef.current.contours
-          if (cs && sung.length >= MIN_DISTINCT_TO_MATCH) {
-            let id = null
-            let matchedWindow = null
-            // Several window lengths: a singer who has just started has little
-            // to go on, and one mid-phrase has more than a match needs.
-            for (const take of [10, 14, 20, 8]) {
-              const recent = sung.slice(-take)
-              if (recent.length < MIN_DISTINCT_TO_MATCH) continue
-              id = identifyPart(recent, cs, SINGER_PARTS)
-              if (id) { matchedWindow = recent; break }
+        if (player) {
+          const head = player.playhead
+          setPlayhead(head)
+
+          // The words. Lyric times are measured from the start of the FILE and
+          // the playhead from the first sung note, so the lead-in is the
+          // difference between the two clocks.
+          if (lyrics) {
+            const at = head + (cacheRef.current.manifest?.lead_in ?? 0)
+            let idx = -1
+            for (let k = 0; k < lyrics.length; k += 1) {
+              if (at >= lyrics[k].t && at < lyrics[k].end) { idx = k; break }
             }
-            if (id) {
-              joiningRef.current = true
-              matchRef.current = id.match
-              // The OTHER line. Sing the melody and she takes the alto; sing
-              // the alto and she takes the melody.
-              const mine = counterpart(id.part, SINGER_PARTS)
-              setAutoPart(mine)
-              const lead = cacheRef.current.manifest.lead_in ?? 0
-
-              // Where she comes in.
-              //
-              // match.time is where the FIRST NOTE OF THE MATCHED WINDOW sits in
-              // the recording — not the first note of the take. Measuring the
-              // elapsed time from the start of the whole take instead put her
-              // seconds further into the song with every phrase sung, which is
-              // heard as her singing something else entirely.
-              const sinceMatchStart =
-                (now - startedAtRef.current) - matchedWindow[0].start
-              player.offset = lead + Math.max(0, id.match.time + sinceMatchStart)
-              player.start([mine])
-              playbackStartedRef.current = now
-              lastVoicedRef.current = now
-              setStatus('Singing with you.')
-              joiningRef.current = false
-
-              // What she decided and why. Reading this back is the only way to
-              // tell "she chose the wrong line" from "she chose the right line
-              // in the wrong place" — they sound identical from the room.
-              try {
-                const fd = new FormData()
-                fd.append('line',
-                  `SING heard=${id.part} sings=${mine} `
-                  + `at=${id.match.time.toFixed(2)}s enters=${player.offset.toFixed(2)}s `
-                  + `since=${sinceMatchStart.toFixed(2)}s conf=${id.match.confidence.toFixed(2)} `
-                  + `key=${id.keyError} margin=${id.margin === Infinity ? 'sole' : id.margin.toFixed(2)} `
-                  + `notes=[${matchedWindow.map((n) => n.midi).join(',')}]`)
-                fetch(`${baseUrl}/debug_log`, { method: 'POST', body: fd }).catch(() => {})
-              } catch { /* telemetry must never break the entrance */ }
+            if (idx !== lineRef.current) {
+              lineRef.current = idx
+              setLineIndex(idx)
             }
           }
-        }
 
-        if (player && (modeRef.current === 'harmonize' || matchRef.current)) {
-          setPlayhead(player.playhead)
           const quiet = now - lastVoicedRef.current
 
           // The recording follows the singer: it waits whenever they are not
@@ -463,9 +383,8 @@ export default function Leader({
   useEffect(() => {
     if (!autoStartRef.current) return undefined
     if (listening) {
-      // teardown(), not stop(): in sing-back mode stop() reads the ending as
-      // "I have finished singing, now imitate me", and a fresh command is not
-      // that. This effect runs again once listening clears, and starts then.
+      // A fresh command restarts rather than joining the take already running.
+      // This effect runs again once listening clears, and starts then.
       teardown()
       return undefined
     }
@@ -486,12 +405,9 @@ export default function Leader({
       autoStartRef.current = false
       start()
     }, { pollMs: QUIET_POLL_MS, maxWaitMs: QUIET_WAIT_MAX_MS })
-  }, [mode, parts, listening, start, teardown])
+  }, [parts, listening, start, teardown])
 
   const stop = useCallback(() => {
-    // Sing back used to synthesise your notes back at you when you stopped.
-    // It answers WHILE you sing now, with the recorded other line, so there is
-    // nothing left to do at the end but stop.
     teardown()
     setStatus('Stopped.')
   }, [teardown])
@@ -515,31 +431,7 @@ export default function Leader({
         </div>
       </div>
 
-      {/* Mode */}
-      <div className="mt-3 flex gap-2">
-        {[
-          ['harmonize', 'Harmonise'],
-          ['imitate', 'Sing back'],
-        ].map(([m, label]) => (
-          <button
-            key={m}
-            type="button"
-            disabled={listening}
-            onClick={() => setMode(m)}
-            className={`flex-1 rounded-xl px-3 py-2 text-sm font-semibold transition ${
-              mode === m
-                ? 'bg-fuchsia-500/80 text-white'
-                : 'bg-white/10 text-white/70 hover:bg-white/20'
-            } disabled:opacity-40`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {mode === 'harmonize' && (
-        <>
-          {/* Parts — any combination */}
+      {/* Parts — any combination */}
           <div className="mt-3">
             <p className="text-[10px] uppercase tracking-widest text-white/40">Voices</p>
             <div className="mt-1.5 grid grid-cols-4 gap-1.5">
@@ -563,17 +455,39 @@ export default function Leader({
             </div>
           </div>
 
-        </>
+      {/* The English words, as she sings the Filipino ones */}
+      {lyrics && (
+        <div className="mt-3 min-h-[4.5rem] rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-center">
+          {lineIndex >= 0 ? (
+            <>
+              <p className="text-base font-semibold leading-snug text-white">
+                {lyrics[lineIndex].text}
+              </p>
+              {/* The line coming next, dimmed: a singer can see it arriving
+                  instead of reading each line only once it is already gone. */}
+              {lyrics[lineIndex + 1] && (
+                <p className="mt-1 text-xs leading-snug text-white/35">
+                  {lyrics[lineIndex + 1].text}
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-xs text-white/30">
+              {listening
+                ? '♪'
+                : 'The English words appear here as she sings.'}
+            </p>
+          )}
+        </div>
       )}
 
       {/* Live chart */}
       <div className="mt-3">
         <HarmonyChart
           userMidi={userMidi}
-          // Two lines: yours and hers. In Sing back the part is whichever she
-          // picked; the chart shows the PITCHES, never the part name.
-          parts={mode === 'harmonize' ? parts : (autoPart ? [autoPart] : [])}
-          nameParts={mode === 'harmonize'}
+          // Yours and hers. The chart shows the PITCHES, not the words.
+          parts={parts}
+          nameParts
           contours={contours}
           playhead={playhead}
           leadIn={manifest?.lead_in ?? 0}
@@ -625,21 +539,13 @@ export default function Leader({
             : 'bg-emerald-500 text-white hover:bg-emerald-400'
         }`}
       >
-        {listening
-          ? mode === 'imitate'
-            ? 'Stop — and sing it back'
-            : 'Stop'
-          : mode === 'imitate'
-            ? 'Start singing'
-            : `Harmonise in ${parts.join(' + ')}`}
+        {listening ? 'Stop' : `Harmonise in ${parts.join(' + ')}`}
       </button>
 
       <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>
-      {mode === 'harmonize' && (
-        <p className="mt-1 text-[10px] text-white/30">
-          Use headphones — otherwise the mic hears the harmony and tracks that instead of you.
-        </p>
-      )}
+      <p className="mt-1 text-[10px] text-white/30">
+        Use headphones — otherwise the mic hears the harmony and tracks that instead of you.
+      </p>
     </section>
   )
 }
