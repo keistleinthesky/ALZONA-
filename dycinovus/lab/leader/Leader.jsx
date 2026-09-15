@@ -70,6 +70,9 @@ export default function Leader({
   armed = null,
   onClear,
   onActiveChange,
+  // Handed the line being sung, so the page can put it on the screen itself
+  // rather than only in this panel. Null when nothing is being sung.
+  onLyric,
 } = {}) {
   const [listening, setListening] = useState(false)
   const [parts, setParts] = useState(['alto'])
@@ -108,8 +111,18 @@ export default function Leader({
   // Which lyric line is on screen. Read inside the animation frame, which
   // would otherwise set state sixty times a second to say nothing changed.
   const lineRef = useRef(-1)
+  // Through a ref: the animation frame is created once per take and would
+  // otherwise hold the callback the page had when singing started.
+  const onLyricRef = useRef(onLyric)
+  // The words, for the same reason. start() is memoised without them, so the
+  // loop it creates captured whatever `lyrics` was when the take began — and
+  // the fetch that fills them in had usually not finished by then. Read from
+  // state, the words were null for the whole take and nothing was ever shown.
+  const lyricsRef = useRef(null)
 
   useEffect(() => { partsRef.current = parts }, [parts])
+  useEffect(() => { onLyricRef.current = onLyric }, [onLyric])
+  useEffect(() => { lyricsRef.current = lyrics }, [lyrics])
 
   // A spoken command ("harmonize with me in tenor and bass") arms the panel.
   useEffect(() => {
@@ -201,6 +214,7 @@ export default function Leader({
     onActiveChange?.(false)      // recognition may listen again
     lineRef.current = -1
     setLineIndex(-1)
+    onLyricRef.current?.(null)
     holdingRef.current = false
     setHolding(false)
     setPitch({ hz: 0, clarity: 0 })
@@ -320,15 +334,17 @@ export default function Leader({
           // The words. Lyric times are measured from the start of the FILE and
           // the playhead from the first sung note, so the lead-in is the
           // difference between the two clocks.
-          if (lyrics) {
+          const words = lyricsRef.current
+          if (words) {
             const at = head + (cacheRef.current.manifest?.lead_in ?? 0)
             let idx = -1
-            for (let k = 0; k < lyrics.length; k += 1) {
-              if (at >= lyrics[k].t && at < lyrics[k].end) { idx = k; break }
+            for (let k = 0; k < words.length; k += 1) {
+              if (at >= words[k].t && at < words[k].end) { idx = k; break }
             }
             if (idx !== lineRef.current) {
               lineRef.current = idx
               setLineIndex(idx)
+              onLyricRef.current?.(idx >= 0 ? words[idx] : null)
             }
           }
 

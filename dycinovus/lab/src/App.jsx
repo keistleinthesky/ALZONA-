@@ -78,6 +78,10 @@ function App({ SingPanel = Sing }) {
   // cannot listen at the same time — they simply restart each other. False
   // means the conversation has it, which is the resting state.
   const [singing, setSinging] = useState(false)
+  // The line being sung right now, shown across the camera frame. The panel
+  // down the page shows it too, but nobody watching the room is reading a
+  // small box below the fold — the Baybayin goes here for the same reason.
+  const [lyricLine, setLyricLine] = useState(null)
 
 
   const audioRef = useRef(null)
@@ -356,6 +360,22 @@ function App({ SingPanel = Sing }) {
                 className="h-full w-full object-contain"
               />
 
+              {/* The words being sung, across the camera frame.
+                  Behind the Baybayin and the video deliberately: those are
+                  answers to something that was just asked, and they win. */}
+              {lyricLine && (
+                <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/70 to-transparent px-6 pb-6 pt-14 text-center">
+                  <p className="text-2xl font-bold leading-tight text-white drop-shadow md:text-4xl">
+                    {lyricLine.fil}
+                  </p>
+                  {lyricLine.en && (
+                    <p className="mt-2 text-base font-semibold leading-tight text-fuchsia-200 drop-shadow md:text-2xl">
+                      {lyricLine.en}
+                    </p>
+                  )}
+                </div>
+              )}
+
               {/* Baybayin image overlays the camera frame */}
               {imageSrc && (
                 <img
@@ -561,6 +581,7 @@ function App({ SingPanel = Sing }) {
               if (!on) setSingCommand(null)
             }}
             onClear={() => setSingCommand(null)}
+            onLyric={setLyricLine}
             // ALZONA hears everything through the singing panel's microphone.
             // When what she heard was a question rather than singing, the answer
             // arrives here and is shown and spoken exactly like a typed one.
