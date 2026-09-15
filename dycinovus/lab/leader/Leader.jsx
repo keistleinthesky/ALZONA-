@@ -82,9 +82,6 @@ export default function Leader({
   const [holding, setHolding] = useState(false)
   const [manifest, setManifest] = useState(null)
   const [contours, setContours] = useState(null)
-  // The English words, and which line of them is being sung right now.
-  const [lyrics, setLyrics] = useState(null)
-  const [lineIndex, setLineIndex] = useState(-1)
 
   // Set when a command arrives, cleared the moment it has been acted on.
   const autoStartRef = useRef(false)
@@ -114,15 +111,14 @@ export default function Leader({
   // Through a ref: the animation frame is created once per take and would
   // otherwise hold the callback the page had when singing started.
   const onLyricRef = useRef(onLyric)
-  // The words, for the same reason. start() is memoised without them, so the
-  // loop it creates captured whatever `lyrics` was when the take began — and
-  // the fetch that fills them in had usually not finished by then. Read from
-  // state, the words were null for the whole take and nothing was ever shown.
+  // The words. Held in a ref rather than state on purpose: nothing in this
+  // panel draws them, and start() is memoised without them, so a loop reading
+  // state would capture whatever they were when the take began — usually
+  // null, the fetch not yet having finished.
   const lyricsRef = useRef(null)
 
   useEffect(() => { partsRef.current = parts }, [parts])
   useEffect(() => { onLyricRef.current = onLyric }, [onLyric])
-  useEffect(() => { lyricsRef.current = lyrics }, [lyrics])
 
   // A spoken command ("harmonize with me in tenor and bass") arms the panel.
   useEffect(() => {
@@ -178,9 +174,9 @@ export default function Leader({
           .split('\n')
           .map((x) => x.trim())
           .filter(Boolean)
-        setLyrics(fil.lines.map((l, i) => ({
+        lyricsRef.current = fil.lines.map((l, i) => ({
           t: l.t, end: l.end, fil: l.text, en: english[i] ?? '',
-        })))
+        }))
       })
       .catch(() => {})
     return () => { alive = false }
@@ -213,7 +209,6 @@ export default function Leader({
     setListening(false)
     onActiveChange?.(false)      // recognition may listen again
     lineRef.current = -1
-    setLineIndex(-1)
     onLyricRef.current?.(null)
     holdingRef.current = false
     setHolding(false)
@@ -250,7 +245,6 @@ export default function Leader({
       lastVoicedRef.current = ctx.currentTime
       hasSungRef.current = false
       lineRef.current = -1
-      setLineIndex(-1)
       playbackStartedRef.current = 0
       holdingRef.current = false
       sustainRef.current = { midi: null, since: 0 }
@@ -343,7 +337,6 @@ export default function Leader({
             }
             if (idx !== lineRef.current) {
               lineRef.current = idx
-              setLineIndex(idx)
               onLyricRef.current?.(idx >= 0 ? words[idx] : null)
             }
           }
@@ -490,31 +483,6 @@ export default function Leader({
               })}
             </div>
           </div>
-
-      {/* The English words, as she sings the Filipino ones */}
-      {lyrics && (
-        <div className="mt-3 min-h-[4.5rem] rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-center">
-          {lineIndex >= 0 ? (
-            <>
-              {/* What she is singing, and what it means. */}
-              <p className="text-base font-semibold leading-snug text-white">
-                {lyrics[lineIndex].fil}
-              </p>
-              {lyrics[lineIndex].en && (
-                <p className="mt-1 text-sm leading-snug text-fuchsia-200/85">
-                  {lyrics[lineIndex].en}
-                </p>
-              )}
-            </>
-          ) : (
-            <p className="text-xs text-white/30">
-              {listening
-                ? '♪'
-                : 'The words appear here as she sings.'}
-            </p>
-          )}
-        </div>
-      )}
 
       {/* Live chart */}
       <div className="mt-3">
