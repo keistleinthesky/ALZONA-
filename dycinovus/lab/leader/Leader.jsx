@@ -144,11 +144,31 @@ export default function Leader({
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => { if (alive && c) { setContours(c); cacheRef.current.contours = c } })
       .catch(() => {})
-    // The English lines, on the same clock as the recording. Missing simply
-    // means no words on screen: the harmony itself does not depend on them.
-    fetch(`${baseUrl}/media/harmony/lyrics_en.json`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((l) => { if (alive && l?.lines?.length) setLyrics(l.lines) })
+    // The words, in both languages.
+    //
+    // The Filipino file carries the timings, measured from the recording. The
+    // English is a PLAIN TEXT file — one line per sung line, blank lines
+    // ignored — so the pairing is rearranged by moving lines around in a text
+    // editor. No JSON to break, nothing to rebuild: save it, reload the page.
+    //
+    // Either one missing just means fewer words on screen. The harmony does
+    // not depend on any of this.
+    Promise.all([
+      fetch(`${baseUrl}/media/harmony/lyrics.json`)
+        .then((r) => (r.ok ? r.json() : null)),
+      fetch(`${baseUrl}/media/harmony/lyrics_en.txt`)
+        .then((r) => (r.ok ? r.text() : '')),
+    ])
+      .then(([fil, en]) => {
+        if (!alive || !fil?.lines?.length) return
+        const english = (en || '')
+          .split('\n')
+          .map((x) => x.trim())
+          .filter(Boolean)
+        setLyrics(fil.lines.map((l, i) => ({
+          t: l.t, end: l.end, fil: l.text, en: english[i] ?? '',
+        })))
+      })
       .catch(() => {})
     return () => { alive = false }
   }, [baseUrl])
@@ -460,14 +480,13 @@ export default function Leader({
         <div className="mt-3 min-h-[4.5rem] rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-center">
           {lineIndex >= 0 ? (
             <>
+              {/* What she is singing, and what it means. */}
               <p className="text-base font-semibold leading-snug text-white">
-                {lyrics[lineIndex].text}
+                {lyrics[lineIndex].fil}
               </p>
-              {/* The line coming next, dimmed: a singer can see it arriving
-                  instead of reading each line only once it is already gone. */}
-              {lyrics[lineIndex + 1] && (
-                <p className="mt-1 text-xs leading-snug text-white/35">
-                  {lyrics[lineIndex + 1].text}
+              {lyrics[lineIndex].en && (
+                <p className="mt-1 text-sm leading-snug text-fuchsia-200/85">
+                  {lyrics[lineIndex].en}
                 </p>
               )}
             </>
@@ -475,7 +494,7 @@ export default function Leader({
             <p className="text-xs text-white/30">
               {listening
                 ? '♪'
-                : 'The English words appear here as she sings.'}
+                : 'The words appear here as she sings.'}
             </p>
           )}
         </div>
