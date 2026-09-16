@@ -1,24 +1,24 @@
-Land of the morning
-Child of the sun returning
-With fervor burning
-Thee do our souls adore
+0.62 Land of the morning
+2.94 Child of the sun returning
+6.60 With fervor burning
+9.70 Thee do our souls adore
 
-Land dear and holy
-Cradle of noble heroes
-Ne'er shall invaders
-Trample thy sacred shores
+12.68 Land dear and holy
+15.54 Cradle of noble heroes
+18.90 Ne'er shall invaders
+21.58 Trample thy sacred shores
 
-Ever within thy skies and through thy clouds
-And o'er thy hills and seas
-Do we behold the radiance, feel the throb
-31.76 Of glorious liberty
+24.23 Ever within thy skies and through thy clouds
+26.38 And o'er thy hills and seas
+29.92 Do we behold the radiance, feel the throb
+32.08 Of glorious liberty
 
 35.76 Thy banner dear to all our hearts
-38.41 Its sun and stars alight
+39.05 Its sun and stars alight
 41.86 Oh, never shall its shining fields
-47.84 Be dimmed by tyrant's might!
+44.42 Be dimmed by tyrant's might!
 
-Beautiful land of love, o land of light
-In thine embrace 'tis rapture to lie
-62.39 But it is glory ever, when thou art wronged
-For us, thy sons to suffer and die
+47.84 Beautiful land of love, o land of light
+54.10 In thine embrace 'tis rapture to lie
+59.74 But it is glory ever, when thou art wronged
+66.40 For us, thy sons to suffer and die
