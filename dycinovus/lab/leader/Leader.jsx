@@ -189,10 +189,21 @@ export default function Leader({
     //
     // Either one missing just means fewer words on screen. The harmony does
     // not depend on any of this.
+    // Never from the cache.
+    //
+    // lyrics_en.txt is edited by hand and the whole point of it is that a
+    // change shows up on the next page load. It does not: the browser cached
+    // the first copy it ever fetched and served that instead, for days. Three
+    // rounds of corrected timings were written, served correctly by the
+    // backend, and never once seen by this page - the copy in the browser
+    // still had no times in it at all. Whatever is on disk is what the singer
+    // should get, so ask for it properly.
+    const fresh = { cache: 'no-store' }
+    const bust = `?v=${Date.now()}`
     Promise.all([
-      fetch(`${baseUrl}/media/harmony/lyrics.json`)
+      fetch(`${baseUrl}/media/harmony/lyrics.json${bust}`, fresh)
         .then((r) => (r.ok ? r.json() : null)),
-      fetch(`${baseUrl}/media/harmony/lyrics_en.txt`)
+      fetch(`${baseUrl}/media/harmony/lyrics_en.txt${bust}`, fresh)
         .then((r) => (r.ok ? r.text() : '')),
     ])
       .then(([fil, en]) => {
