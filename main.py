@@ -2361,6 +2361,45 @@ def _print_image_sync(path, printer_name):
         hDC.DeleteDC()
 
 
+# Windows accepts a job for a printer that is switched off, out of paper, or
+# marked "Use Printer Offline", and holds it in the queue indefinitely. Nothing
+# fails, so printing reported success and no paper appeared - four Baybayin
+# sheets sat unprinted in a queue while the log said each one had printed.
+_PRINTER_TROUBLE = (
+    (0x00000400, "set to Use Printer Offline in Windows"),   # attribute
+)
+_PRINTER_STATUS_TROUBLE = (
+    (0x00000080, "offline"),
+    (0x00001000, "not available"),
+    (0x00000010, "out of paper"),
+    (0x00000008, "jammed"),
+    (0x00400000, "a door is open"),
+    (0x00100000, "waiting for someone at the printer"),
+    (0x00000002, "reporting an error"),
+    (0x00000001, "paused"),
+)
+
+
+def _printer_trouble(name):
+    """Why this printer would not print, or None if it looks ready."""
+    try:
+        h = win32print.OpenPrinter(name)
+        try:
+            info = win32print.GetPrinter(h, 2)
+        finally:
+            win32print.ClosePrinter(h)
+    except Exception:
+        return None          # cannot tell; let the print attempt decide
+
+    for bit, why in _PRINTER_TROUBLE:
+        if info.get("Attributes", 0) & bit:
+            return why
+    for bit, why in _PRINTER_STATUS_TROUBLE:
+        if info.get("Status", 0) & bit:
+            return why
+    return None
+
+
 def print_image(path, label="", glyphs=None):
     """Send an image to the printer, off the request thread so a busy or offline
     printer never stalls ALZONA's reply.
@@ -2395,6 +2434,17 @@ def print_image(path, label="", glyphs=None):
             return
 
         printer = _PRINTER or win32print.GetDefaultPrinter()
+
+        # Say so instead of queueing into the dark.
+        trouble = _printer_trouble(printer)
+        if trouble:
+            last_print_status = {"word": label, "ok": False,
+                                 "detail": f"{printer} is {trouble}",
+                                 "time": time.time()}
+            print(f"Not printed — {printer} is {trouble}. "
+                  f"The thermal printer was not plugged in either.")
+            return
+
         try:
             _print_image_sync(path, printer)
             last_print_status = {"word": label, "ok": True, "detail": printer,
