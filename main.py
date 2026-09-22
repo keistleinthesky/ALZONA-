@@ -2278,6 +2278,20 @@ except Exception as _e:
 _THERMAL_FIRST = os.environ.get("BAYBAYIN_THERMAL", "1").strip().lower() not in (
     "0", "false", "no", "off")
 
+# Baybayin prints on the thermal printer or not at all.
+#
+# It used to fall back to whatever Windows had as its default, which sounds
+# helpful and is not: the robot carries the thermal printer, a visitor takes
+# the strip away with them, and an A4 sheet from an office printer in another
+# room is no use to anybody. Worse, the fallback was silent - the EPSON sat
+# marked "Use Printer Offline" and four sheets queued up over sixteen minutes
+# while the log reported each one printed.
+#
+# Set BAYBAYIN_ALLOW_FALLBACK=1 in .env to let it use an ordinary printer
+# again, for a demo with no thermal printer to hand.
+_ALLOW_FALLBACK = os.environ.get(
+    "BAYBAYIN_ALLOW_FALLBACK", "").strip().lower() in ("1", "true", "yes", "on")
+
 # The coin she was asked about, filled in when the vision model answers.
 #
 # Reading a coin takes about four and a half seconds — the model's own latency,
@@ -2404,10 +2418,11 @@ def print_image(path, label="", glyphs=None):
     """Send an image to the printer, off the request thread so a busy or offline
     printer never stalls ALZONA's reply.
 
-    The thermal printer is tried first whenever it is plugged in: it is the one
-    the robot carries, it needs no driver, and it prints a strip a visitor can
-    take away rather than a sheet of A4. Anything else falls back to the
-    Windows default printer, or BAYBAYIN_PRINTER if that names one."""
+    The thermal printer is the only one used: it is the one the robot carries,
+    it needs no driver, and it prints a strip a visitor can take away rather
+    than a sheet of A4. If it is not plugged in, nothing is printed and the
+    reason is said plainly - see _ALLOW_FALLBACK for the way back to an
+    ordinary printer."""
 
     def _job():
         global last_print_status
@@ -2421,9 +2436,16 @@ def print_image(path, label="", glyphs=None):
                                      "time": time.time()}
                 print(f"Baybayin printed on the thermal printer: {label}")
                 return
-            # Not plugged in is the ordinary case, not an error worth failing
-            # on — fall through to whatever else is available.
-            print("Thermal printer unavailable:", detail)
+            last_print_status = {"word": label, "ok": False,
+                                 "detail": f"thermal printer — {detail}",
+                                 "time": time.time()}
+            print("Not printed —", detail)
+
+            if not _ALLOW_FALLBACK:
+                return
+
+            print("Falling back to an ordinary printer "
+                  "(BAYBAYIN_ALLOW_FALLBACK is set).")
 
         # ---- anything else Windows knows about ----
         if not _PRINTING_AVAILABLE:
