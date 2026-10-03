@@ -23,7 +23,7 @@
       "id": "ama-namin",
       "title": "Ama Namin",
       "dir": "ama-namin",
-      "ready": false,
+      "ready": true,
       "aliases": [
         "ama namin",
         "our father",
@@ -31,7 +31,8 @@
         "lords prayer",
         "ama namen",
         "amanamin"
-      ]
+      ],
+      "_parts_note": "Tenor and bass recorded so far. Soprano and alto still to come; the panel offers only the parts the manifest lists."
     }
   ]
 }

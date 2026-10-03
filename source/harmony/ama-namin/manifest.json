@@ -1,0 +1,23 @@
+{
+  "_comment": "Measured by scripts/analyze_harmony.py. Regenerate if the recordings are replaced.",
+  "song": "Ama Namin",
+  "duration": 114.64,
+  "sample_rate": 44100,
+  "lead_in": 0.59,
+  "_lead_in_note": "Seconds of silence before the first sung note. Playback starts here so the downbeat lands with the singer.",
+  "beats_per_bar": 4,
+  "parts": {
+    "tenor": {
+      "file": "tenor.mp3",
+      "start_note": "D3",
+      "start_hz": 143.1
+    },
+    "bass": {
+      "file": "bass.mp3",
+      "start_note": "D3",
+      "start_hz": 150.8
+    }
+  },
+  "phrase_boundaries": [],
+  "_boundaries_note": "Gaps present in EVERY part — safe places to stop the ensemble without cutting a word. Empty until all parts are recorded."
+}

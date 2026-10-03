@@ -156,6 +156,25 @@ export default function Leader({
   useEffect(() => {
     songRef.current = songs.find((x) => x.id === songId) ?? null
   }, [songs, songId])
+
+  // A song is only recorded in the parts its manifest lists. Ama Namin has
+  // tenor and bass so far, and the panel used to offer all four — picking
+  // alto then failed at the moment of singing, which is the worst place to
+  // find out. Unrecorded parts are shown greyed instead.
+  const available = manifest?.parts ? PARTS.filter((p) => manifest.parts[p]) : PARTS
+
+  // Keep the selection inside what exists. The default is alto, which Ama
+  // Namin does not have; without this, choosing that song left the panel
+  // pointing at a part it could never sing.
+  useEffect(() => {
+    if (!manifest?.parts) return
+    setParts((cur) => {
+      const keep = cur.filter((p) => manifest.parts[p])
+      if (keep.length) return keep.length === cur.length ? cur : keep
+      const first = PARTS.find((p) => manifest.parts[p])
+      return first ? [first] : cur
+    })
+  }, [manifest])
   useEffect(() => { onLyricRef.current = onLyric }, [onLyric])
 
   // A spoken command ("harmonize with me in tenor and bass") arms the panel.
@@ -293,6 +312,7 @@ export default function Leader({
       const ordered = PARTS.filter((x) => next.includes(x))
       return ordered.length ? ordered : cur
     })
+
 
   const teardown = useCallback(() => {
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
@@ -653,11 +673,13 @@ export default function Leader({
             <div className="mt-1.5 grid grid-cols-4 gap-1.5">
               {PARTS.map((p) => {
                 const on = parts.includes(p)
+                const missing = !available.includes(p)
                 return (
                   <button
                     key={p}
                     type="button"
-                    disabled={listening}
+                    disabled={listening || missing}
+                    title={missing ? 'Not recorded for this song yet' : undefined}
                     onClick={() => togglePart(p)}
                     style={on ? { background: PART_COLORS[p], color: '#171457' } : undefined}
                     className={`rounded-lg px-1 py-2 text-xs font-bold capitalize transition ${
