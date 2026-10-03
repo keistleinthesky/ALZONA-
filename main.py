@@ -2044,6 +2044,44 @@ def parse_sing_parts(text):
     return [p for p in SATB_PARTS if p in found]
 
 
+# The songs the harmony panel offers, read from source/harmony/songs.json so
+# that adding one is a data change rather than a code change.
+#
+# Loaded once at startup. A song listed with ready false is known by name but
+# has no recordings yet: she says so instead of starting something silent.
+def _load_songs():
+    path = os.path.join(BASE, "source", "harmony", "songs.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            songs = json.load(f).get("songs", [])
+    except Exception as e:
+        print("Harmony songs.json unreadable:", str(e)[:120])
+        return []
+    for sg in songs:
+        # Longest first, so "lupang hinirang" wins over the "lupang" that
+        # sits inside it and a two-word name is never half-matched.
+        sg["aliases"] = sorted(
+            {a.lower() for a in sg.get("aliases", [])} | {sg["title"].lower()},
+            key=len, reverse=True)
+    return songs
+
+
+HARMONY_SONGS = _load_songs()
+print("Harmony songs: " + ", ".join(
+    "%s%s" % (sg["title"], "" if sg.get("ready") else " (no recordings yet)")
+    for sg in HARMONY_SONGS) if HARMONY_SONGS else "Harmony songs: none listed")
+
+
+def detect_sing_song(text):
+    """Which song was asked for, or None if the command did not name one."""
+    t = (text or "").lower()
+    for sg in HARMONY_SONGS:
+        for alias in sg["aliases"]:
+            if alias in t:
+                return sg
+    return None
+
+
 def detect_sing_command(text):
     """Recognise a Lupang Hinirang singing command. Returns a dict the frontend
     uses to arm its listener, or None."""
@@ -2057,7 +2095,19 @@ def detect_sing_command(text):
                                    "sing"))
     if harmonize:
         parts = parse_sing_parts(text) or ["alto"]
+
+        # "alzona harmonize with me in ama namin in alto" — one command, both
+        # the song and the part. Naming no song keeps the old behaviour and
+        # takes the first one that has recordings, which is what every
+        # command meant before there was more than one song.
+        song = detect_sing_song(text)
+        if song is None:
+            song = next((sg for sg in HARMONY_SONGS if sg.get("ready")), None)
+
         return {"mode": "harmonize", "parts": parts,
+                "song": song["id"] if song else None,
+                "song_title": song["title"] if song else None,
+                "song_ready": bool(song and song.get("ready")),
                 # Kept for the synth fallback when a recording is missing.
                 "part": parts[0], "offset": SATB_OFFSETS[parts[0]],
                 "reference_note": SING_REFERENCE_NOTE,

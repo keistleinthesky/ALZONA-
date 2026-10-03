@@ -11,8 +11,13 @@ import {
 } from './harmonyPlayer'
 
 // =============================================================================
-// LUPANG HINIRANG — recorded SATB harmony, with the English words on screen
+// HARMONY — recorded SATB parts for any of the songs, words on screen
 // =============================================================================
+// One panel, several songs. Which songs exist is read from
+// source/harmony/songs.json, so adding one is a folder of recordings and an
+// entry in that file; nothing here changes. A song listed without recordings
+// is shown greyed out rather than hidden, because "it is coming" is more use
+// to someone looking at the screen than a name that simply is not there.
 // One job now. Harmonise plays the real recorded voices: a fixed piece needs
 // the actual written parts, and a synth guessing intervals produces parallel
 // motion that is musically wrong however accurate the pitch tracking is.
@@ -94,6 +99,8 @@ export default function Leader({
   onLyric,
 } = {}) {
   const [listening, setListening] = useState(false)
+  const [songs, setSongs] = useState([])
+  const [songId, setSongId] = useState(null)
   const [parts, setParts] = useState(['alto'])
   const [pitch, setPitch] = useState({ hz: 0, clarity: 0 })
   const [status, setStatus] = useState('Idle')
@@ -127,6 +134,7 @@ export default function Leader({
   const boundsRef = useRef([])
   const sustainRef = useRef({ midi: null, since: 0 })
   const partsRef = useRef(parts)
+  const songRef = useRef(null)
   // Which lyric line is on screen. Read inside the animation frame, which
   // would otherwise set state sixty times a second to say nothing changed.
   const lineRef = useRef(-1)
@@ -145,6 +153,9 @@ export default function Leader({
   const lyricsRef = useRef(null)
 
   useEffect(() => { partsRef.current = parts }, [parts])
+  useEffect(() => {
+    songRef.current = songs.find((x) => x.id === songId) ?? null
+  }, [songs, songId])
   useEffect(() => { onLyricRef.current = onLyric }, [onLyric])
 
   // A spoken command ("harmonize with me in tenor and bass") arms the panel.
@@ -160,6 +171,18 @@ export default function Leader({
       return
     }
 
+    // "alzona harmonize with me in ama namin in alto" — one command carrying
+    // both. A song with no recordings is refused here rather than started and
+    // then found to be silent.
+    if (armed.song) {
+      if (armed.song_ready === false) {
+        setStatus(`I don't have ${armed.song_title ?? 'that song'} recorded yet.`)
+        onClear?.()
+        return
+      }
+      setSongId(armed.song)
+    }
+
     if (armed.parts?.length) setParts(armed.parts)
     else if (armed.part) setParts([armed.part])
     // "harmonize me in alto" is already the instruction to begin. Arming the
@@ -169,14 +192,40 @@ export default function Leader({
   }, [armed, onClear])
 
 
-  // Pull the manifest up front so the UI can show the tempo before playing.
+  // Which songs there are. First one with recordings is the one selected.
   useEffect(() => {
     let alive = true
-    fetch(`${baseUrl}/media/harmony/manifest.json`)
+    fetch(`${baseUrl}/media/harmony/songs.json`, { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!alive || !d?.songs?.length) return
+        setSongs(d.songs)
+        setSongId((cur) => cur ?? (d.songs.find((x) => x.ready) ?? d.songs[0]).id)
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [baseUrl])
+
+  // That song's manifest and words, so the panel can show its tempo and the
+  // overlay has something to display before a note is played.
+  useEffect(() => {
+    const song = songs.find((x) => x.id === songId)
+    if (!song) return undefined
+    const dir = song.dir ? `${song.dir}/` : ''
+    let alive = true
+
+    // Belongs to the previous song. Clearing stops its tempo and its words
+    // showing against this one while the new files are on their way.
+    setManifest(null)
+    setContours(null)
+    lyricsRef.current = null
+    cacheRef.current = { dir: song.dir ?? '' }
+
+    fetch(`${baseUrl}/media/harmony/${dir}manifest.json`)
       .then((r) => (r.ok ? r.json() : null))
       .then((m) => { if (alive && m) { setManifest(m); cacheRef.current.manifest = m } })
       .catch(() => {})
-    fetch(`${baseUrl}/media/harmony/contours.json`)
+    fetch(`${baseUrl}/media/harmony/${dir}contours.json`)
       .then((r) => (r.ok ? r.json() : null))
       .then((c) => { if (alive && c) { setContours(c); cacheRef.current.contours = c } })
       .catch(() => {})
@@ -201,9 +250,9 @@ export default function Leader({
     const fresh = { cache: 'no-store' }
     const bust = `?v=${Date.now()}`
     Promise.all([
-      fetch(`${baseUrl}/media/harmony/lyrics.json${bust}`, fresh)
+      fetch(`${baseUrl}/media/harmony/${dir}lyrics.json${bust}`, fresh)
         .then((r) => (r.ok ? r.json() : null)),
-      fetch(`${baseUrl}/media/harmony/lyrics_en.txt${bust}`, fresh)
+      fetch(`${baseUrl}/media/harmony/${dir}lyrics_en.txt${bust}`, fresh)
         .then((r) => (r.ok ? r.text() : '')),
     ])
       .then(([fil, en]) => {
@@ -230,7 +279,7 @@ export default function Leader({
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [baseUrl])
+  }, [baseUrl, songs, songId])
 
   const setHold = (v) => {
     holdingRef.current = v
@@ -315,9 +364,11 @@ export default function Leader({
       setPlayhead(0)
 
       {
-        setStatus('Loading the harmony parts…')
+        const song = songRef.current
+        setStatus(`Loading ${song?.title ?? 'the harmony'}…`)
         const chosen = partsRef.current
-        const loaded = await loadHarmony(baseUrl, ctx, chosen, cacheRef.current)
+        const loaded = await loadHarmony(baseUrl, ctx, chosen,
+                                         cacheRef.current, song?.dir ?? '')
         cacheRef.current = loaded
         setManifest(loaded.manifest)
         setContours(loaded.contours)
@@ -360,12 +411,14 @@ export default function Leader({
           // the mic opened — everything before this was count-in.
           lastVoicedRef.current = ctx.currentTime
           playbackStartedRef.current = ctx.currentTime
-          setStatus(`Harmonising in ${chosen.join(' + ')} — sing!`)
+          setStatus(`${song?.title ?? 'Harmonising'} in `
+            + `${chosen.join(' + ')} — sing!`)
         }, waitMs)
         setStatus(`Count-in… (${bpm} BPM)`)
       }
       setListening(true)
-      say(baseUrl, `start parts=${partsRef.current.join('+')} `
+      say(baseUrl, `start song=${songRef.current?.id ?? '?'} `
+        + `parts=${partsRef.current.join('+')} `
         + `lead_in=${cacheRef.current.manifest?.lead_in ?? '?'}`)
 
       const tick = () => {
@@ -554,13 +607,45 @@ export default function Leader({
     <section className="rounded-2xl border border-white/10 bg-[rgba(255,255,255,0.06)] p-4 shadow-2xl shadow-black/20 backdrop-blur-sm">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-xs uppercase tracking-[0.35em] text-white/50">Lupang Hinirang</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-white/50">
+            {songs.find((x) => x.id === songId)?.title ?? 'Harmony'}
+          </p>
           <h2 className="mt-1 text-lg font-bold text-white">Sing &amp; Harmonise</h2>
         </div>
         <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
           {manifest ? `${manifest.tempo_bpm} BPM` : 'pitch'}
         </div>
       </div>
+
+      {/* Song. One panel for all of them, rather than a panel each. */}
+      {songs.length > 1 && (
+        <div className="mt-3">
+          <p className="text-[10px] uppercase tracking-widest text-white/40">Song</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {songs.map((sg) => {
+              const on = sg.id === songId
+              // Listed but not recorded yet: shown, and plainly not pickable.
+              const waiting = !sg.ready
+              return (
+                <button
+                  key={sg.id}
+                  type="button"
+                  disabled={listening || waiting}
+                  title={waiting ? 'No recordings for this one yet' : undefined}
+                  onClick={() => setSongId(sg.id)}
+                  className={`rounded-lg px-3 py-2 text-xs font-bold transition ${
+                    on ? 'bg-fuchsia-500/80 text-white'
+                       : 'bg-white/10 text-white/60 hover:bg-white/20'
+                  } disabled:opacity-30`}
+                >
+                  {sg.title}
+                  {waiting && <span className="ml-1 font-normal">· soon</span>}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Parts — any combination */}
           <div className="mt-3">
@@ -644,7 +729,10 @@ export default function Leader({
             : 'bg-emerald-500 text-white hover:bg-emerald-400'
         }`}
       >
-        {listening ? 'Stop' : `Harmonise in ${parts.join(' + ')}`}
+        {listening
+          ? 'Stop'
+          : `Harmonise ${songs.find((x) => x.id === songId)?.title ?? ''} `
+            + `in ${parts.join(' + ')}`}
       </button>
 
       <p className={`mt-2 text-xs ${holding ? 'text-amber-300' : 'text-white/50'}`}>{status}</p>

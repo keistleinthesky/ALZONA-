@@ -10,18 +10,27 @@
 // waiting at the rests covers the common case (holding the last note of a
 // phrase) with far less that can go wrong.
 
-const MEDIA = (baseUrl, file) => `${baseUrl}/media/harmony/${file}`
+// Each song has its own folder under source/harmony. Lupang Hinirang's dir is
+// the empty string: its files sit directly in source/harmony, where the
+// consoles on 5173 and 5174 still read them from, and moving them would break
+// those.
+const MEDIA = (baseUrl, dir, file) =>
+  `${baseUrl}/media/harmony/${dir ? dir + '/' : ''}${file}`
 
 export const PARTS = ['soprano', 'alto', 'tenor', 'bass']
 
 /** Load the manifest + contours + the audio for the requested parts. */
-export async function loadHarmony(baseUrl, ctx, parts, cache = {}) {
+export async function loadHarmony(baseUrl, ctx, parts, cache = {}, dir = '') {
+  // A cache belongs to one song. Reusing another song's manifest would play
+  // this song's audio against the wrong lead-in and the wrong phrase ends.
+  if (cache.dir !== undefined && cache.dir !== dir) cache = { dir }
+
   const manifest =
     cache.manifest ??
-    (await fetch(MEDIA(baseUrl, 'manifest.json')).then((r) => r.json()))
+    (await fetch(MEDIA(baseUrl, dir, 'manifest.json')).then((r) => r.json()))
   const contours =
     cache.contours ??
-    (await fetch(MEDIA(baseUrl, 'contours.json')).then((r) => r.json()))
+    (await fetch(MEDIA(baseUrl, dir, 'contours.json')).then((r) => r.json()))
 
   const buffers = { ...(cache.buffers ?? {}) }
   await Promise.all(
@@ -30,11 +39,12 @@ export async function loadHarmony(baseUrl, ctx, parts, cache = {}) {
       .map(async (p) => {
         const info = manifest.parts[p]
         if (!info) return
-        const raw = await fetch(MEDIA(baseUrl, info.file)).then((r) => r.arrayBuffer())
+        const raw = await fetch(MEDIA(baseUrl, dir, info.file))
+          .then((r) => r.arrayBuffer())
         buffers[p] = await ctx.decodeAudioData(raw)
       }),
   )
-  return { manifest, contours, buffers }
+  return { manifest, contours, buffers, dir }
 }
 
 /**

@@ -1,0 +1,37 @@
+{
+  "_comment": "Every song the harmony panel offers, and the names she answers to. Adding a song is an entry here plus its folder; nothing in the code needs to change.",
+  "_dir_note": "dir is the folder under source/harmony holding manifest.json, contours.json, lyrics.json, lyrics_en.txt and the part recordings. Lupang Hinirang has dir \"\" because its files sit directly in source/harmony, where the consoles on 5173 and 5174 still read them from — moving them would break those.",
+  "_ready_note": "ready false means the song is listed but has no recordings yet: the panel shows it greyed out and she says she cannot sing it rather than starting something silent.",
+  "_aliases_note": "How the song might be ASKED for, including what speech recognition tends to hear. Matched longest-first, so a two-word name wins over a one-word one it contains.",
+  "songs": [
+    {
+      "id": "lupang-hinirang",
+      "title": "Lupang Hinirang",
+      "dir": "",
+      "ready": true,
+      "aliases": [
+        "lupang hinirang",
+        "pambansang awit",
+        "national anthem",
+        "the anthem",
+        "lupang",
+        "hinirang",
+        "anthem"
+      ]
+    },
+    {
+      "id": "ama-namin",
+      "title": "Ama Namin",
+      "dir": "ama-namin",
+      "ready": false,
+      "aliases": [
+        "ama namin",
+        "our father",
+        "the lord's prayer",
+        "lords prayer",
+        "ama namen",
+        "amanamin"
+      ]
+    }
+  ]
+}
