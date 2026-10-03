@@ -97,10 +97,11 @@ def pitch(frame_x, rate):
     if ac[peak] < 0.3:
         return 0.0
 
-    # Prefer the earliest lag that is nearly as strong: the true period, not
-    # a multiple of it heard an octave down.
+    # Prefer an earlier lag only when it is nearly as strong: the true period,
+    # not a multiple of it heard an octave down. 0.85 was too generous and let
+    # a harmonic win - it read a bass part's opening D3 as a D#5.
     for lag in range(lo, peak):
-        if ac[lag] >= ac[peak] * 0.85:
+        if ac[lag] >= ac[peak] * 0.95:
             peak = lag
             break
 
@@ -148,13 +149,19 @@ def analyse(path):
     start = first_sound(env, rate)
     end = last_sound(env, rate)
 
-    # The first sung pitch, taken a little after the onset so the attack has
-    # settled into a note.
-    i = int((start + 0.12) * rate)
-    hz = 0.0
-    while i < len(x) - FRAME and hz == 0.0 and i < int((start + 1.0) * rate):
+    # The first sung pitch: the MEDIAN over the first second of singing, not
+    # the first frame that happens to return something. One frame is a coin
+    # toss - a breath, the attack of the note, a gate opening - and this
+    # number is what she sounds for the singer to tune to, so a wrong one is
+    # worse than none. Voting across the opening note throws the outliers out.
+    heard = []
+    i = int((start + 0.10) * rate)
+    while i < len(x) - FRAME and i < int((start + 1.10) * rate):
         hz = pitch(x[i:i + FRAME], rate)
+        if hz:
+            heard.append(hz)
         i += HOP
+    hz = float(np.median(heard)) if heard else 0.0
 
     return {
         "file": os.path.basename(path),
