@@ -1,7 +1,7 @@
 {
   "_comment": "Measured by scripts/analyze_harmony.py. Regenerate if the recordings are replaced.",
   "song": "Bahay Kubo",
-  "duration": 27.9,
+  "duration": 27.96,
   "sample_rate": 44100,
   "lead_in": 0.0,
   "_lead_in_note": "Seconds of silence before the first sung note. Playback starts here so the downbeat lands with the singer.",
