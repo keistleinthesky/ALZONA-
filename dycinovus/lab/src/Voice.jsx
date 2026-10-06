@@ -60,6 +60,37 @@ const STOP_RE = new RegExp(
   "i"
 );
 
+// The browser's own voice is the last fallback, used when the paid voices
+// are out of quota. It is also the only one that picks its own speaker: a
+// bare utterance gets the system default, which on Windows is Microsoft
+// David, and ALZONA turned into a man halfway through a demo because of it.
+//
+// Matched by name, because the API does not say which voices are female —
+// `gender` was dropped from the spec and no browser reports it.
+const FEMALE_VOICE =
+  /zira|eva|hazel|susan|samantha|aria|jenny|michelle|catherine|linda|heera|female|femenin|mujer/i;
+const MALE_VOICE = /david|mark|james|george|ravi|guy|male|masculin|hombre/i;
+
+function pickBrowserVoice(lang) {
+  let all = [];
+  try {
+    all = window.speechSynthesis.getVoices() || [];
+  } catch {
+    return null;
+  }
+  if (!all.length) return null;          // not loaded yet; default is better
+                                         // than nothing, and the next reply
+                                         // will find them
+  const base = (lang || "en-US").slice(0, 2).toLowerCase();
+  const sameLang = all.filter((v) => (v.lang || "").toLowerCase().startsWith(base));
+  const pool = sameLang.length ? sameLang : all;
+  return (
+    pool.find((v) => FEMALE_VOICE.test(v.name)) ??
+    pool.find((v) => !MALE_VOICE.test(v.name)) ??
+    pool[0]
+  );
+}
+
 // Speech-recognition languages the user can pick from (the Web Speech API
 // cannot auto-detect the spoken language — it needs to be told).
 // Philippine English first, and the default.
@@ -593,6 +624,12 @@ export default function VoiceRecorder({
     doneFetching();
     if ("speechSynthesis" in window) {
       const u = new SpeechSynthesisUtterance(text);
+      // Choose the voice. Left unset, Windows hands out its default, which
+      // is Microsoft David - so the moment the paid voices hit their quota
+      // and she fell back to here, ALZONA became a man mid-demo.
+      u.lang = srLangRef.current || "en-US";
+      const picked = pickBrowserVoice(u.lang);
+      if (picked) u.voice = picked;
       // Synthesis reports no progress events worth trusting, so hold the
       // window open on a timer and let it lapse the moment speaking stops.
       const holdOpen = setInterval(() => markSpeaking(), 250);
