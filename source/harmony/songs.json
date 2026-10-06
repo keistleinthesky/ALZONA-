@@ -47,7 +47,7 @@
         "nipa hut",
         "kubo"
       ],
-      "_parts_note": "Soprano C5 and alto E4, from screen recordings and lifted to sit with the other songs - soprano 1.77x, alto 1.43x. The alto was sung along to the soprano, which is why it lines up: 0.07s overall, within a quarter second across every third of the song. It was trimmed 0.66s at the front, because the soprano take was cut after its first note had started and the alto was not, and at 28.86s, where a blip well after the singing was making the length check read three seconds too long. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
+      "_parts_note": "Soprano C5 and alto E4. The alto was sung along to the soprano, which is why they line up: 0.00s offset, each third of the song within a quarter second. Trimmed 0.73s at the front - the soprano take was cut after its first note had started and the alto was not - and at 28.93s where the singing ends. Levels lifted to 0.21 and 0.20, from 0.12 and 0.14. The alto tracks about three times less cleanly than the soprano (median pitch spread 18 against 6), which shows in the live chart but not in playback. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
     }
   ]
 }
