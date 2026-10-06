@@ -47,7 +47,7 @@
         "nipa hut",
         "kubo"
       ],
-      "_parts_note": "Soprano C5 and alto E4. The alto is the recording as sung, nothing cut, level raised x1.53. It sits about 0.56s behind the soprano, because the soprano take was cut after its first note had started and this one was not - trimming the alto by that much lines them up but takes 0.28s off its opening note, which is a trade and not a fix. The soprano is the one worth recording again. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
+      "_parts_note": "Soprano C5 and alto E4, both as sung with nothing cut, levels raised x1.77 and x1.53. The alto sits about 0.56s behind the soprano across the song. An earlier note here blamed that on the soprano take being clipped at its opening; it is not - at sample resolution it rises from silence over 80ms, which is an attack, not a truncation. Both takes also end in a natural decay. The lag is in the performances, not the files. The song itself stops partway through, at sari-sari. No phrase boundaries: the alto sustains through the soprano's breaths."
     }
   ]
 }
