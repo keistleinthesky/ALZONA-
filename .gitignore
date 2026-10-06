@@ -45,6 +45,7 @@ static/tts/
 static/baybayin/
 uploads/
 dycinovus/dist/
+dycinovus/dist-harmonizer/
 *.log
 
 # =============================================================================
@@ -61,3 +62,7 @@ desktop.ini
 
 # Generated code bundle - regenerate with scripts, don't version it.
 ALZONA_source_code.txt
+ALZONA_5174_code.txt
+ALZONA_5175_code.txt
+ALZONA_5175_project.zip
+dycinovus/dist-lab/

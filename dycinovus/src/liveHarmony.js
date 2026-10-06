@@ -70,6 +70,11 @@ export class LiveHarmony {
     this.onUpdate?.({ ...result, hz, clarity, voiced: voiced && !mine })
   }
 
+  /** Sing a named SATB line — soprano, alto, tenor or bass. */
+  setPart(part) {
+    this.brain.setPart(part)
+  }
+
   setPlan(plan) {
     this.brain.setPlan(plan)
   }

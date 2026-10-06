@@ -164,17 +164,104 @@ export function nearestDegree(sungMidi, key) {
  * listener actually hears. Snapping the harmony to concert pitch instead makes
  * every slightly-flat note beat against its own harmony.
  */
-export function harmonyInterval(sungMidi, key, steps) {
+export function harmonyNote(sungMidi, key, steps) {
   const scale = scaleOf(key)
-  const { degree, snapped } = nearestDegree(sungMidi, key)
+  const { degree } = nearestDegree(sungMidi, key)
   const target = degree + steps
   const oct = Math.floor(target / 7)
-  const harmony = key.tonic + oct * 12 + scale[target - oct * 7]
-  let interval = harmony - snapped
+  return key.tonic + oct * 12 + scale[target - oct * 7]
+}
+
+export function harmonyInterval(sungMidi, key, steps) {
+  const { snapped } = nearestDegree(sungMidi, key)
+  let interval = harmonyNote(sungMidi, key, steps) - snapped
   // Fold back into a register a voice can actually sing.
   while (sungMidi + interval < LOW_MIDI) interval += 12
   while (sungMidi + interval > HIGH_MIDI) interval -= 12
   return interval
+}
+
+// -----------------------------------------------------------------------------
+// SATB parts, by name
+// -----------------------------------------------------------------------------
+// Everything above answers "how far away should the second voice be". This
+// answers a different question the singer actually asks: "sing the ALTO line".
+//
+// The anchors are the notes each part starts Lupang Hinirang on, read from
+// source/harmony/manifest.json, because that is the arrangement this robot
+// knows and those are the notes the singer thinks in — you start on G4 and you
+// are the soprano. The ranges around them are ordinary choral ones.
+export const PART_NAMES = ['soprano', 'alto', 'tenor', 'bass']
+export const PART_ANCHOR = { soprano: 67, alto: 62, tenor: 59, bass: 55 }
+export const PART_RANGE = {
+  soprano: { lo: 60, hi: 81 },
+  alto: { lo: 55, hi: 74 },
+  tenor: { lo: 48, hi: 69 },
+  bass: { lo: 40, hi: 62 },
+}
+
+// Who answers whom. Soprano and alto pair off, tenor and bass likewise:
+// reaching across that divide puts the two lines so far apart they stop
+// sounding like one thing.
+const PARTNER = { soprano: 'alto', alto: 'soprano', tenor: 'bass', bass: 'tenor' }
+
+/** The part that should sing against this one. */
+export const partnerOf = (part) => PARTNER[part] ?? 'alto'
+
+/**
+ * Which part is this person singing, judged from one note.
+ *
+ * Nearest anchor wins, which puts the soprano/alto line between E4 and F4.
+ * That is deliberately where the anthem's own two lines separate rather than
+ * where a textbook would put it.
+ */
+export function partOf(midi) {
+  let best = 'soprano'
+  let d = Infinity
+  for (const name of PART_NAMES) {
+    const gap = Math.abs(midi - PART_ANCHOR[name])
+    if (gap < d) { d = gap; best = name }
+  }
+  return best
+}
+
+// Thirds and sixths first, then fifths and fourths; no seconds and no sevenths,
+// which is what keeps every candidate below something you would willingly sing.
+const CONSONANT = [-5, -4, -2, 2, 4, 5]
+// The same interval an octave or two either way, so a line can be placed in a
+// part's register rather than merely near the melody.
+const OCTAVES = [-14, -7, 0, 7]
+
+/**
+ * Scale steps that put the harmony in a NAMED part's register.
+ *
+ * Scored on how near the result sits to the part's home note, with leaving the
+ * part's range at all treated as much worse than sitting away from its middle,
+ * and a nudge towards thirds and sixths when two candidates land equally well.
+ *
+ * Returned as steps rather than an interval so the rest of the brain is
+ * unchanged: the phrase lock, the stability timer and the intonation-following
+ * all still apply.
+ */
+export function stepsForPart(sungMidi, key, part) {
+  const range = PART_RANGE[part] ?? PART_RANGE.alto
+  const anchor = PART_ANCHOR[part] ?? PART_ANCHOR.alto
+  let best = null
+  for (const base of CONSONANT) {
+    for (const oct of OCTAVES) {
+      const steps = base + oct
+      const note = harmonyNote(sungMidi, key, steps)
+      // Unison, or close enough to read as one voice out of tune rather than
+      // two voices. Never useful, whatever the register says.
+      if (Math.abs(note - sungMidi) < 2) continue
+      const outside = note < range.lo ? range.lo - note
+        : note > range.hi ? note - range.hi : 0
+      const flavour = Math.abs(base) === 2 || Math.abs(base) === 5 ? 0 : 0.8
+      const score = Math.abs(note - anchor) + outside * 4 + flavour
+      if (!best || score < best.score) best = { score, steps }
+    }
+  }
+  return [best ? best.steps : -2]
 }
 
 // A new note has to hold this long before the harmony follows it. Shorter and
@@ -192,8 +279,11 @@ const PHRASE_GAP_MS = 400
  * stable is its job, not the caller's.
  */
 export class HarmonyBrain {
-  constructor({ plan = 'auto', keyHalfLife = 12 } = {}) {
+  constructor({ plan = 'auto', part = null, keyHalfLife = 12 } = {}) {
     this.plan = plan
+    // When set, this wins over `plan`: the singer asked for a NAMED line
+    // rather than an interval, and where that line sits decides the rest.
+    this.part = part
     this.tracker = new KeyTracker({ halfLife: keyHalfLife })
     this.key = null
     this.intervals = []
@@ -202,6 +292,20 @@ export class HarmonyBrain {
     this.lastVoicedAt = -Infinity
     this.phraseSteps = null // locked at the start of each phrase, for 'auto'
     this.sungMidi = null
+  }
+
+  /**
+   * Sing one or more named SATB lines. Pass null for interval voicings.
+   * @param {string|string[]|null} part
+   */
+  setPart(part) {
+    const a = part == null ? [] : [].concat(part)
+    const b = this.part == null ? [] : [].concat(this.part)
+    if (a.length === b.length && a.every((x, i) => x === b[i])) return
+    this.part = part
+    this.phraseSteps = null
+    this.intervals = []
+    this.candidate = null
   }
 
   setPlan(plan) {
@@ -214,6 +318,11 @@ export class HarmonyBrain {
 
   /** The scale steps to use for a phrase that starts on this note. */
   stepsFor(midi) {
+    if (this.part) {
+      // Several named lines at once is just each of them worked out
+      // separately -- they are independent voices, not a chord shape.
+      return [].concat(this.part).flatMap((p) => stepsForPart(midi, this.key, p))
+    }
     const named = PLANS[this.plan]
     if (named?.steps) return named.steps
     // Auto: harmonise underneath, unless there is no room underneath — in which

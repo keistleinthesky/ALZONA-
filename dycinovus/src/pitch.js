@@ -150,7 +150,20 @@ export function detectPitch(buf, sampleRate, noiseFloor = 1e-5) {
   const x3 = nsdf[maxPos + 1] ?? nsdf[maxPos]
   const a = (x1 + x3 - 2 * x2) / 2
   const b = (x3 - x1) / 2
-  if (a !== 0) T = maxPos - b / (2 * a)
+  // A maximum curves DOWNWARDS, so a >= 0 is not a peak at all and the vertex
+  // is meaningless there. The clamp matters just as much: the vertex of a
+  // parabola through three points either side of a true discrete maximum lies
+  // within half a sample of it, so anything further is the arithmetic running
+  // away, not a better estimate.
+  //
+  // Unguarded, a near-flat peak (a ~ 0) sent b/(2a) to infinity and T with it.
+  // Live that produced periods of a fraction of a sample and "pitches" of
+  // -3662Hz, 1462Hz, -6459Hz, all logged as out-of-range and discarded. The
+  // note was being sung and the detector had found it; only this line lost it.
+  if (a < 0) {
+    const shift = -b / (2 * a)
+    if (shift > -0.5 && shift < 0.5) T = maxPos + shift
+  }
 
   const hz = sampleRate / T
   const clarity = Math.max(0, Math.min(1, nsdf[maxPos]))
