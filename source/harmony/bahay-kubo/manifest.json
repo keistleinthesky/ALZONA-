@@ -1,16 +1,16 @@
 {
   "_comment": "Measured by scripts/analyze_harmony.py. Regenerate if the recordings are replaced.",
   "song": "Bahay Kubo",
-  "duration": 28.51,
+  "duration": 28.55,
   "sample_rate": 44100,
-  "lead_in": 0.0,
+  "lead_in": 0.24,
   "_lead_in_note": "Seconds of silence before the first sung note. Playback starts here so the downbeat lands with the singer.",
   "beats_per_bar": 4,
   "parts": {
     "soprano": {
       "file": "soprano.mp3",
       "start_note": "C5",
-      "start_hz": 518.1
+      "start_hz": 523.7
     },
     "alto": {
       "file": "alto.mp3",
