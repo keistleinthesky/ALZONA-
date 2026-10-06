@@ -1,84 +1,44 @@
 {
-  "_comment": "Times in seconds from the start of the file. Bahay Kubo's lead_in is 0.26, so subtract that for playhead seconds.",
+  "_comment": "Times in seconds from the start of the file. Subtract the manifest's lead_in for playhead seconds.",
   "song": "Bahay Kubo",
   "source": "Traditional Filipino folk song.",
-  "_timing_note": "Measured from the soprano: eight stretches of singing at 0.26-3.45, 3.81-7.05, 7.40-10.61, 11.04-14.16, 14.54-18.09, 18.30-21.55, 21.90-25.57, 25.73-28.55. Seven carry two lines and are split down the middle; the fourth carries 'sitaw, bataw, patani' alone. Re-measured when the soprano was re-recorded - the takes rest in different places.",
-  "_caveat": "Nobody has yet listened to the recording against these words. The phrase edges are measured; the split inside each phrase is even, so a line may sit slightly early or late within its own phrase.",
+  "_incomplete_note": "The recording sings as far as 'sitaw, bataw, patani' and stops. The rest of the song - kundol, patola, the onions and garlic, the sesame at the end - is not in the take, so it is not here either. Record the whole song and these lines need measuring again.",
+  "_timing_note": "Eight stretches of singing, measured from the soprano: 0.26-3.45, 3.81-7.05, 7.40-10.61, 11.04-14.16, 14.54-18.09, 18.30-21.55, 21.90-25.57, 25.73-28.55. One line to a stretch for the first seven; the last line is held across the eighth too, rather than assuming the eighth repeats it.",
   "lines": [
     {
       "t": 0.26,
-      "end": 1.76,
+      "end": 3.35,
       "text": "Bahay kubo,"
     },
     {
-      "t": 1.86,
-      "end": 3.35,
+      "t": 3.81,
+      "end": 6.95,
       "text": "kahit munti,"
     },
     {
-      "t": 3.81,
-      "end": 5.33,
-      "text": "ang halaman doon,"
-    },
-    {
-      "t": 5.43,
-      "end": 6.95,
-      "text": "ay sari-sari."
-    },
-    {
       "t": 7.4,
-      "end": 8.9,
-      "text": "Singkamas at talong,"
-    },
-    {
-      "t": 9.0,
       "end": 10.51,
-      "text": "sigarilyas at mani,"
+      "text": "ang halaman doon,"
     },
     {
       "t": 11.04,
       "end": 14.06,
-      "text": "sitaw, bataw, patani."
+      "text": "ay sari-sari."
     },
     {
       "t": 14.54,
-      "end": 16.21,
-      "text": "Kundol, patola,"
-    },
-    {
-      "t": 16.31,
       "end": 17.99,
-      "text": "upo't kalabasa,"
+      "text": "Singkamas at talong,"
     },
     {
       "t": 18.3,
-      "end": 19.82,
-      "text": "at saka meron pa,"
-    },
-    {
-      "t": 19.93,
       "end": 21.45,
-      "text": "labanos, mustasa."
+      "text": "sigarilyas at mani,"
     },
     {
       "t": 21.9,
-      "end": 23.63,
-      "text": "Sibuyas, kamatis,"
-    },
-    {
-      "t": 23.73,
-      "end": 25.47,
-      "text": "bawang at luya."
-    },
-    {
-      "t": 25.73,
-      "end": 27.04,
-      "text": "Sa paligid-ligid"
-    },
-    {
-      "t": 27.14,
       "end": 28.45,
-      "text": "ay puno ng linga!"
+      "text": "sitaw, bataw, patani."
     }
   ]
 }

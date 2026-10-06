@@ -10,7 +10,7 @@
     "soprano": {
       "file": "soprano.mp3",
       "start_note": "C5",
-      "start_hz": 523.7
+      "start_hz": 523.6
     },
     "alto": {
       "file": "alto.mp3",

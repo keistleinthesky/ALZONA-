@@ -48,7 +48,7 @@
         "nipa hut",
         "kubo"
       ],
-      "_parts_note": "Soprano C5 and alto E4, both as sung with nothing cut. They line up: 0.06s offset, every third of the song within 0.08s, 0.14s of drift. Sung lengths agree to 0.02s. The soprano is the quieter of the two at 0.14 against 0.20 - it arrived 12x under and its peak only allowed 5.6x back, short of the 9.4x it wanted. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
+      "_parts_note": "Soprano C5 and alto E4, both as sung with nothing cut. They line up: 0.06s offset, every third within 0.08s, sung lengths 0.02s apart. The soprano arrived 12x under level; plain gain stopped at 5.6x on one loud moment, so it is brought up 8x through a soft knee at 0.70 instead, reaching 0.20 to match the alto. That costs a little tracking - 9 of 14 windows read as one voice against 13 of 14 before - because the noise under the voice comes up with it. The take sings only as far as 'sitaw, bataw, patani'."
     }
   ],
   "_ends_at_note": "ends_at stops a song before its recording does, in seconds from the first sung note. Omit it and the take runs until the singer stops."
