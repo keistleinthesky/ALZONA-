@@ -22,8 +22,13 @@
 // nothing: a bare name only ever earns an introduction, never an action.
 // Name variants cover common speech-recognition mishearings of "Alzona",
 // including how Japanese/Korean/Chinese recognition writes the name.
+// The last vowel is optional. Quiet audio makes recognition clip the final
+// syllable: the log has "Azon" and "Alzon" arriving at confidence 1.00 while
+// she sat there not answering. A name that only matches when it arrives whole
+// is a name that fails exactly when the room is noisy, which is the one place
+// it has to work. "alson" and "azon" are not things anyone says by accident.
 export const NAME =
-  "(?:al\\s?[zs][oae]na|el[zs][oa]na|arizona|alona|ol[zs]ona|az[oa]na)"
+  "(?:al\\s?[zs][oae]na?|el[zs][oa]na?|arizona|alona|ol[zs]ona?|az[oa]na?)"
 export const NAME_CJK =
   "(?:アルゾナ|アルソナ|アルゾーナ|アルソーナ|알조나|알소나|알존아|阿尔佐纳|阿尔索纳|阿爾佐納|阿爾索納|奥佐娜)"
 
