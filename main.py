@@ -2063,6 +2063,20 @@ def _load_songs():
         sg["aliases"] = sorted(
             {a.lower() for a in sg.get("aliases", [])} | {sg["title"].lower()},
             key=len, reverse=True)
+
+        # The opening note of each part, so she can name the right one. A
+        # song with no manifest keeps an empty dict and she simply does not
+        # claim a note, which is better than naming the wrong one.
+        sg["start_notes"] = {}
+        mpath = os.path.join(BASE, "source", "harmony", sg.get("dir", ""),
+                             "manifest.json")
+        try:
+            with open(mpath, encoding="utf-8") as f:
+                for part, info in json.load(f).get("parts", {}).items():
+                    if info.get("start_note"):
+                        sg["start_notes"][part] = info["start_note"]
+        except Exception:
+            pass
     return songs
 
 
@@ -2104,7 +2118,12 @@ def detect_sing_command(text):
         if song is None:
             song = next((sg for sg in HARMONY_SONGS if sg.get("ready")), None)
 
+        # The note the first part she is singing actually opens on, so the
+        # spoken line and the note the panel sounds are the same note.
+        start_note = (song or {}).get("start_notes", {}).get(parts[0])
+
         return {"mode": "harmonize", "parts": parts,
+                "start_note": start_note,
                 "song": song["id"] if song else None,
                 "song_title": song["title"] if song else None,
                 "song_ready": bool(song and song.get("ready")),
@@ -3114,8 +3133,14 @@ def route_command(transcript, asked_by=""):
                 who = "all four parts"
             else:
                 who = " and ".join([", ".join(parts[:-1]), parts[-1]])
-            reply = (f"Okay — sing Lupang Hinirang and I'll harmonize with you in "
-                     f"{who}. Starting on G4, four four time.")
+            title = sing.get("song_title") or "Lupang Hinirang"
+            if not sing.get("song_ready", True):
+                reply = f"I don't have {title} recorded yet."
+            else:
+                note = sing.get("start_note")
+                opening = f" Starting on {note}," if note else " Starting on"
+                reply = (f"Okay — sing {title} and I'll harmonize with you in "
+                         f"{who}.{opening} four four time.")
         else:
             reply = "Sing a line of Lupang Hinirang and I'll sing it back to you."
         return {"mode": "sing", "reply": reply, "sing": sing}
