@@ -47,7 +47,7 @@
         "nipa hut",
         "kubo"
       ],
-      "_parts_note": "Soprano C5 and alto E4. The alto was sung along to the soprano, which is why they line up: 0.00s offset, each third of the song within a quarter second. Trimmed 0.56s at the front - the soprano take was cut after its first note had started and the alto was not - and at 29.0s where the singing ends. Levels lifted to 0.21 and 0.20, from 0.12 and 0.13. The alto tracks less cleanly than the soprano, which shows in the live chart but not in playback. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
+      "_parts_note": "Soprano C5 and alto E4. The alto is the recording as sung, nothing cut, level raised x1.53. It sits about 0.56s behind the soprano, because the soprano take was cut after its first note had started and this one was not - trimming the alto by that much lines them up but takes 0.28s off its opening note, which is a trade and not a fix. The soprano is the one worth recording again. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
     }
   ]
 }
