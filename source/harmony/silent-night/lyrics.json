@@ -2,7 +2,7 @@
   "_comment": "Times in seconds from the start of the file, the same clock as the recordings. The panel subtracts the manifest's lead_in to put them on the playhead.",
   "song": "Silent Night",
   "source": "Words: Joseph Mohr, 1816, in the English of John Freeman Young, 1859. Melody: Franz Gruber, 1818. All long out of copyright.",
-  "_caveat": "The three verses are the standard ones and the timing was measured, but nobody has yet listened to the recording against these words to confirm it sings these verses in this order. Check by ear before a performance.",
+  "_caveat": "The two verses are the standard ones and the timing was measured, but nobody has yet listened to the recording against these words to confirm it sings them in this order. Check by ear before a performance.",
   "_timing_note": "Each verse is twelve bars, two bars to a line, so the six lines divide it evenly. Checked against the soprano's held notes: every internal line end agrees within 0.25s, most within 0.15s.",
   "lines": [
     {
@@ -64,36 +64,7 @@
       "t": 69.68,
       "end": 75.48,
       "text": "Christ the Saviour is born"
-    },
-    {
-      "t": 75.94,
-      "end": 81.79,
-      "text": "Silent night, holy night"
-    },
-    {
-      "t": 81.94,
-      "end": 87.79,
-      "text": "Son of God, love's pure light"
-    },
-    {
-      "t": 87.94,
-      "end": 93.79,
-      "text": "Radiant beams from Thy holy face"
-    },
-    {
-      "t": 93.94,
-      "end": 99.79,
-      "text": "With the dawn of redeeming grace"
-    },
-    {
-      "t": 99.94,
-      "end": 105.79,
-      "text": "Jesus, Lord, at Thy birth"
-    },
-    {
-      "t": 105.94,
-      "end": 111.79,
-      "text": "Jesus, Lord, at Thy birth"
     }
-  ]
+  ],
+  "_stops_note": "The recording carries a third verse. The song is set to stop at the end of the second, in songs.json, so the words stop there too."
 }

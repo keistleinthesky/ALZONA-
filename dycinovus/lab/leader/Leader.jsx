@@ -424,13 +424,18 @@ export default function Leader({
         })
         playerRef.current = player
 
-        // No fixed length: the recording runs on and the take ends when the
-        // singer stops (SILENCE_STOP below), so a short demo and a full
-        // performance need no different setup.
+        // A song may finish before its recording does. Silent Night was
+        // recorded with three verses and is sung with two, so ends_at in
+        // songs.json stops it at the end of the second rather than leaving
+        // a verse nobody wants playing to the room. Without one the take
+        // runs on and ends when the singer stops, which is what every song
+        // did before this.
+        const endAfter = songRef.current?.ends_at ?? null
+
         const waitMs = Math.max(0, (endsAt - ctx.currentTime) * 1000)
         setTimeout(() => {
           if (!playerRef.current) return
-          playerRef.current.start(chosen)
+          playerRef.current.start(chosen, { stopAfter: endAfter })
           // The clock for "have they stopped singing?" starts HERE, not when
           // the mic opened — everything before this was count-in.
           lastVoicedRef.current = ctx.currentTime

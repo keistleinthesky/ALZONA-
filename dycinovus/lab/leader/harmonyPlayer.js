@@ -108,7 +108,15 @@ export class HarmonyPlayer {
       // does not clip and the singer can still hear themselves.
       g.gain.value = 1 / Math.max(1, Math.sqrt(this.parts.length))
       src.connect(g).connect(this.gain)
-      src.start(now, this.offset)
+      // stopAt was being set and then ignored, so a song asked to finish
+      // early played to the end of the file regardless. The third argument
+      // is how much of the buffer to play, which ends every part on the
+      // same sample rather than fading them out one at a time.
+      if (this.stopAt != null) {
+        src.start(now, this.offset, Math.max(0, this.stopAt - this.offset))
+      } else {
+        src.start(now, this.offset)
+      }
       this.sources.push(src)
     }
 

@@ -32,7 +32,8 @@
         "noche de paz",
         "tahimik na gabi"
       ],
-      "_parts_note": "All four parts recorded. Measured by scripts/analyze_harmony.py: they agree within 0.12s, and the opening notes make a B flat major chord - B flat in the bass, D in the alto, F in the soprano."
+      "_parts_note": "All four parts recorded: they agree within 0.12s, and the opening notes make a B flat major chord - B flat in the bass, D in the alto, F in the soprano. The recording has three verses; ends_at stops it at the end of the second, which is a rest every part shares, so nothing is cut off mid-note. lyrics.json carries those two verses only.",
+      "ends_at": 71.85
     },
     {
       "id": "bahay-kubo",
@@ -49,5 +50,6 @@
       ],
       "_parts_note": "Soprano C5 and alto E4, both as sung with nothing cut, levels raised x1.77 and x1.53. The alto sits about 0.56s behind the soprano across the song. An earlier note here blamed that on the soprano take being clipped at its opening; it is not - at sample resolution it rises from silence over 80ms, which is an attack, not a truncation. Both takes also end in a natural decay. The lag is in the performances, not the files. The song itself stops partway through, at sari-sari. No phrase boundaries: the alto sustains through the soprano's breaths."
     }
-  ]
+  ],
+  "_ends_at_note": "ends_at stops a song before its recording does, in seconds from the first sung note. Omit it and the take runs until the singer stops."
 }
