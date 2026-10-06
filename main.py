@@ -2096,48 +2096,78 @@ def detect_sing_song(text):
     return None
 
 
+def _spoken_list(items):
+    """["soprano", "alto"] -> "soprano and alto", for reading aloud."""
+    items = list(items)
+    if not items:
+        return "nothing"
+    if len(items) == 1:
+        return items[0]
+    return " and ".join([", ".join(items[:-1]), items[-1]])
+
+
 def detect_sing_command(text):
-    """Recognise a Lupang Hinirang singing command. Returns a dict the frontend
-    uses to arm its listener, or None."""
+    """Recognise a singing command. Returns a dict the frontend uses to arm
+    its listener, or None."""
     t = (text or "").lower()
-    anthem = any(w in t for w in ("lupang hinirang", "lupang", "hinirang",
-                                  "national anthem", "pambansang awit"))
+
+    # Sing back has to be ASKED for by name. It used to be anything
+    # containing "sing", which swallowed "sing Silent Night in soprano alto
+    # tenor and bass" - a plain harmony request - and answered it with the
+    # sing-back line, naming Lupang Hinirang at that.
+    sing_back = any(w in t for w in ("sing back", "sing it back", "imitate",
+                                     "copy me", "repeat after", "follow me",
+                                     "gayahin", "ulitin"))
     harmonize = any(w in t for w in ("harmonize", "harmony", "harmonise",
-                                     "sabayan", "boses"))
-    imitate = any(w in t for w in ("sing back", "imitate", "copy", "repeat after",
-                                   "follow me", "gayahin", "ulitin", "sing with",
-                                   "sing"))
-    if harmonize:
-        parts = parse_sing_parts(text) or ["alto"]
+                                     "sabayan", "boses", "sing with"))
+    # On a word boundary: "singkil" is a dance, not an instruction to sing.
+    # The dance answer happens to be checked first, so this has never shown,
+    # but it should not depend on the order of two unrelated features.
+    asks = bool(re.search(r"\b(?:sing|kanta|kantahin|awit|awitin)\b", t))
 
-        # "alzona harmonize with me in silent night in alto" — one command, both
-        # the song and the part. Naming no song keeps the old behaviour and
-        # takes the first one that has recordings, which is what every
-        # command meant before there was more than one song.
-        song = detect_sing_song(text)
-        if song is None:
-            song = next((sg for sg in HARMONY_SONGS if sg.get("ready")), None)
+    song = detect_sing_song(text)
+    named = parse_sing_parts(text)
 
-        # The note the first part she is singing actually opens on, so the
-        # spoken line and the note the panel sounds are the same note.
-        start_note = (song or {}).get("start_notes", {}).get(parts[0])
-
-        return {"mode": "harmonize", "parts": parts,
-                "start_note": start_note,
+    if sing_back and not harmonize:
+        return {"mode": "imitate", "parts": [], "part": None, "offset": 0,
                 "song": song["id"] if song else None,
                 "song_title": song["title"] if song else None,
-                "song_ready": bool(song and song.get("ready")),
-                # Kept for the synth fallback when a recording is missing.
-                "part": parts[0], "offset": SATB_OFFSETS[parts[0]],
                 "reference_note": SING_REFERENCE_NOTE,
                 "reference_hz": SING_REFERENCE_HZ,
                 "beats_per_bar": 4}
-    if anthem or imitate:
-        return {"mode": "imitate", "parts": [], "part": None, "offset": 0,
-                "reference_note": SING_REFERENCE_NOTE,
-                "reference_hz": SING_REFERENCE_HZ,
-                "beats_per_bar": 4}
-    return None
+
+    if not (harmonize or song or named or asks):
+        return None
+
+    # Naming no song takes the first one with recordings, which is what
+    # every command meant before there was more than one song.
+    if song is None:
+        song = next((sg for sg in HARMONY_SONGS if sg.get("ready")), None)
+
+    # Only the parts this song was actually recorded in. Bahay Kubo has a
+    # soprano and nothing else, and agreeing to sing its alto produces
+    # silence at the moment of singing - the worst place to find out.
+    have = [p for p in SATB_PARTS
+            if p in ((song or {}).get("start_notes") or {})]
+    missing = [p for p in named if have and p not in have]
+    parts = [p for p in named if p in have] if have else list(named)
+    if not parts:
+        parts = (["alto"] if "alto" in have else have[:1]) if have else ["alto"]
+
+    return {"mode": "harmonize", "parts": parts,
+            # The note this part actually opens on, so the sentence she says
+            # and the note the panel sounds are the same note.
+            "start_note": (song or {}).get("start_notes", {}).get(parts[0]),
+            "missing_parts": missing,
+            "available_parts": have,
+            "song": song["id"] if song else None,
+            "song_title": song["title"] if song else None,
+            "song_ready": bool(song and song.get("ready")),
+            # Kept for the synth fallback when a recording is missing.
+            "part": parts[0], "offset": SATB_OFFSETS[parts[0]],
+            "reference_note": SING_REFERENCE_NOTE,
+            "reference_hz": SING_REFERENCE_HZ,
+            "beats_per_bar": 4}
 
 
 # =========================================================
@@ -3137,12 +3167,27 @@ def route_command(transcript, asked_by=""):
             if not sing.get("song_ready", True):
                 reply = f"I don't have {title} recorded yet."
             else:
+                # Asked for a part this song was never recorded in: say what
+                # there is rather than agreeing and then singing nothing.
+                head = ""
+                if sing.get("missing_parts"):
+                    head = (f"I only have {_spoken_list(sing['available_parts'])} "
+                            f"recorded for {title}, so ")
                 note = sing.get("start_note")
-                opening = f" Starting on {note}," if note else " Starting on"
-                reply = (f"Okay — sing {title} and I'll harmonize with you in "
-                         f"{who}.{opening} four four time.")
+                # No note known means no manifest, and a sentence that says
+                # "starting on" and then no note is worse than not saying it.
+                tail = f" Starting on {note}, four four time." if note \
+                    else " Four four time."
+                # "...for Bahay Kubo, so sing it" — the title has just been
+                # said, and saying it twice in one breath reads as a stutter.
+                what = "it" if head else title
+                reply = (f"{head}{'' if head else 'Okay — '}sing {what} and "
+                         f"I'll harmonize with you in {who}.{tail}")
         else:
-            reply = "Sing a line of Lupang Hinirang and I'll sing it back to you."
+            # Sing back names the song that was asked for too. The workbench
+            # console has no sing back at all and says so when this arrives.
+            back = sing.get("song_title") or "Lupang Hinirang"
+            reply = f"Sing a line of {back} and I'll sing it back to you."
         return {"mode": "sing", "reply": reply, "sing": sing}
 
     # "what coin is this", "identify this coin", "anong barya ito"

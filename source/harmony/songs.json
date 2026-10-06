@@ -33,6 +33,21 @@
         "tahimik na gabi"
       ],
       "_parts_note": "All four parts recorded. Measured by scripts/analyze_harmony.py: they agree within 0.12s, and the opening notes make a B flat major chord - B flat in the bass, D in the alto, F in the soprano."
+    },
+    {
+      "id": "bahay-kubo",
+      "title": "Bahay Kubo",
+      "dir": "bahay-kubo",
+      "ready": true,
+      "aliases": [
+        "bahay kubo",
+        "bahaykubo",
+        "bahay cubo",
+        "buhay kubo",
+        "nipa hut",
+        "kubo"
+      ],
+      "_parts_note": "Soprano only. Taken from a screen recording and brought up 1.77x to sit with the other songs. Alto was recorded twice and neither take reads as a single voice - the microphone was about ten times too quiet and something else was audible underneath."
     }
   ]
 }

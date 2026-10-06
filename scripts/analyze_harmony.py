@@ -43,6 +43,10 @@ MIN_NOTE = 0.09
 # all ten and invents none. 0.35, picked to match the panel's hold window,
 # found two - the rests between phrases are breath-length, not pauses.
 MIN_GAP = 0.10
+# Boundaries closer together than this are the same rest. It matches the
+# window Leader.jsx treats a boundary as occupying, so two inside it could
+# never be told apart anyway.
+BOUNDARY_APART = 0.35
 
 
 def load(path):
@@ -178,7 +182,16 @@ def shared_rests(envs, rate, lead_in, hop=HOP):
 
     # A run reaching the end of the file is the silence after the last note,
     # not a phrase end - there is nothing left to come back for.
-    return [t for t in out if t > 0]
+    out = [t for t in out if t > 0]
+
+    # Two boundaries inside the panel's own 0.35s window are one boundary: a
+    # single breath that a frame popping over the threshold split in two.
+    # Bahay Kubo came out with 17.50 and 17.68 in it, which is one rest.
+    merged = []
+    for t in out:
+        if not merged or t - merged[-1] >= BOUNDARY_APART:
+            merged.append(t)
+    return merged
 
 
 def analyse(path):
