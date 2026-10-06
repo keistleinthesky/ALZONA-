@@ -47,7 +47,7 @@
         "nipa hut",
         "kubo"
       ],
-      "_parts_note": "Soprano and alto, both taken from screen recordings and lifted to sit with the other songs - soprano 1.77x, alto 5.73x, which is as far as it goes before clipping. They agree within 0.75s, looser than the 0.12s of Silent Night but close enough to play together. No phrase boundaries: the alto never falls quiet where the soprano does, so there is no rest the two share."
+      "_parts_note": "Soprano C5 and alto E4, from screen recordings and lifted to sit with the other songs - soprano 1.77x, alto 1.43x. The alto was sung along to the soprano, which is why it lines up: 0.07s overall, within a quarter second across every third of the song. It was trimmed 0.66s at the front, because the soprano take was cut after its first note had started and the alto was not, and at 28.86s, where a blip well after the singing was making the length check read three seconds too long. No phrase boundaries: the alto sustains through the soprano's breaths, so the two share no rest."
     }
   ]
 }
