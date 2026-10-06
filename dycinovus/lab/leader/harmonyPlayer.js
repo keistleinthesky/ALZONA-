@@ -17,6 +17,18 @@
 const MEDIA = (baseUrl, dir, file) =>
   `${baseUrl}/media/harmony/${dir ? dir + '/' : ''}${file}`
 
+// Ask the server whether these files have changed instead of assuming they
+// have not. A recording gets replaced far more often than its name does -
+// a part re-sung, a take trimmed to line up with another - and the browser
+// happily serves the copy it fetched the first time, for days. The lyrics
+// hit this and were fixed; the audio and the manifest were not, so a new
+// take could be on disk, served correctly, and still never reach the page.
+//
+// 'no-cache' revalidates rather than refetching: the browser asks, and the
+// server answers 304 when nothing changed, so an unchanged take costs a
+// round trip rather than a megabyte.
+const FRESH = { cache: 'no-cache' }
+
 export const PARTS = ['soprano', 'alto', 'tenor', 'bass']
 
 /** Load the manifest + contours + the audio for the requested parts. */
@@ -27,10 +39,10 @@ export async function loadHarmony(baseUrl, ctx, parts, cache = {}, dir = '') {
 
   const manifest =
     cache.manifest ??
-    (await fetch(MEDIA(baseUrl, dir, 'manifest.json')).then((r) => r.json()))
+    (await fetch(MEDIA(baseUrl, dir, 'manifest.json'), FRESH).then((r) => r.json()))
   const contours =
     cache.contours ??
-    (await fetch(MEDIA(baseUrl, dir, 'contours.json')).then((r) => r.json()))
+    (await fetch(MEDIA(baseUrl, dir, 'contours.json'), FRESH).then((r) => r.json()))
 
   const buffers = { ...(cache.buffers ?? {}) }
   await Promise.all(
@@ -39,7 +51,7 @@ export async function loadHarmony(baseUrl, ctx, parts, cache = {}, dir = '') {
       .map(async (p) => {
         const info = manifest.parts[p]
         if (!info) return
-        const raw = await fetch(MEDIA(baseUrl, dir, info.file))
+        const raw = await fetch(MEDIA(baseUrl, dir, info.file), FRESH)
           .then((r) => r.arrayBuffer())
         buffers[p] = await ctx.decodeAudioData(raw)
       }),
