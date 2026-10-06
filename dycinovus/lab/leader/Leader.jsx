@@ -71,6 +71,9 @@ const SUSTAIN_HOLD = 0.5
 // If the count-in finishes and no singing arrives at all, stop rather than
 // playing all 72 seconds to an empty room.
 const NO_SHOW_STOP = 12.0
+// The count-in tempo when a manifest does not name one, which so far is
+// every manifest: analyze_harmony.py measures pitch and timing, not tempo.
+const DEFAULT_BPM = 84
 
 
 // `onActiveChange` is the one addition to this otherwise original panel. Only
@@ -157,10 +160,11 @@ export default function Leader({
     songRef.current = songs.find((x) => x.id === songId) ?? null
   }, [songs, songId])
 
-  // A song is only recorded in the parts its manifest lists. Ama Namin has
-  // tenor and bass so far, and the panel used to offer all four — picking
-  // alto then failed at the moment of singing, which is the worst place to
-  // find out. Unrecorded parts are shown greyed instead.
+  // A song is only recorded in the parts its manifest lists, and a song part
+  // way through being recorded has some of the four. The panel used to offer
+  // all four regardless — picking one nobody had sung failed at the moment of
+  // singing, which is the worst place to find out. Unrecorded parts are shown
+  // greyed instead.
   const available = manifest?.parts ? PARTS.filter((p) => manifest.parts[p]) : PARTS
 
   // Keep the selection inside what exists. The default is alto, which Ama
@@ -190,7 +194,7 @@ export default function Leader({
       return
     }
 
-    // "alzona harmonize with me in ama namin in alto" — one command carrying
+    // "alzona harmonize with me in silent night in alto" — one command carrying
     // both. A song with no recordings is refused here rather than started and
     // then found to be silent.
     if (armed.song) {
@@ -408,7 +412,7 @@ export default function Leader({
         setStatus('Listen for your starting note…')
         const refLen = soundReference(ctx, refHz, 1.6)
 
-        const bpm = loaded.manifest.tempo_bpm ?? 84
+        const bpm = loaded.manifest.tempo_bpm ?? DEFAULT_BPM
         const { endsAt } = countIn(ctx, bpm, 4, ctx.currentTime + refLen + 0.25)
 
         const player = new HarmonyPlayer(ctx, loaded.manifest, loaded.buffers, {
@@ -633,7 +637,7 @@ export default function Leader({
           <h2 className="mt-1 text-lg font-bold text-white">Sing &amp; Harmonise</h2>
         </div>
         <div className="rounded-full border border-fuchsia-400/30 bg-fuchsia-400/10 px-3 py-1 text-xs font-semibold text-fuchsia-200">
-          {manifest ? `${manifest.tempo_bpm} BPM` : 'pitch'}
+          {manifest ? `${manifest.tempo_bpm ?? DEFAULT_BPM} BPM` : 'pitch'}
         </div>
       </div>
 

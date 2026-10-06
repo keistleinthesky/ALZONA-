@@ -2096,7 +2096,7 @@ def detect_sing_command(text):
     if harmonize:
         parts = parse_sing_parts(text) or ["alto"]
 
-        # "alzona harmonize with me in ama namin in alto" — one command, both
+        # "alzona harmonize with me in silent night in alto" — one command, both
         # the song and the part. Naming no song keeps the old behaviour and
         # takes the first one that has recordings, which is what every
         # command meant before there was more than one song.

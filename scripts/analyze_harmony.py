@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Measure a song's recorded parts and write its manifest and contours.
 
-    python scripts/analyze_harmony.py ama-namin
+    python scripts/analyze_harmony.py silent-night
 
 The manifest in source/harmony has always said its numbers came from
 "scripts/analyze_harmony". That script did not exist - the numbers for Lupang
@@ -37,6 +37,12 @@ MIN_HZ, MAX_HZ = 60.0, 1100.0
 SILENCE_RMS = 0.012
 # A note has to last this long to be a note and not a slide between two.
 MIN_NOTE = 0.09
+# A rest every part shares has to last this long to be a phrase end rather
+# than the gap between two words. Calibrated against Lupang Hinirang, whose
+# ten boundaries were measured by hand before this code existed: 0.10 finds
+# all ten and invents none. 0.35, picked to match the panel's hold window,
+# found two - the rests between phrases are breath-length, not pauses.
+MIN_GAP = 0.10
 
 
 def load(path):
@@ -143,6 +149,38 @@ def contour(x, rate):
     return notes
 
 
+def shared_rests(envs, rate, lead_in, hop=HOP):
+    """Where EVERY part is quiet at once, in playhead seconds.
+
+    A rest in one voice is not a phrase end - the others are still singing
+    through it, and stopping there cuts them off mid-word. Only a gap the
+    whole ensemble shares is somewhere the music can wait.
+
+    Times are returned from the first sung note, not from the top of the
+    file, because that is the clock the panel's playhead runs on.
+    """
+    n = min(len(e) for e in envs)
+    quiet = np.ones(n, dtype=bool)
+    for e in envs:
+        quiet &= e[:n] <= SILENCE_RMS
+
+    out, run_start = [], None
+    for i in range(n):
+        if quiet[i]:
+            if run_start is None:
+                run_start = i
+            continue
+        if run_start is not None:
+            t0, t1 = run_start * hop / rate, i * hop / rate
+            if t1 - t0 >= MIN_GAP:
+                out.append(round(t0 - lead_in, 2))
+            run_start = None
+
+    # A run reaching the end of the file is the silence after the last note,
+    # not a phrase end - there is nothing left to come back for.
+    return [t for t in out if t > 0]
+
+
 def analyse(path):
     x, rate = load(path)
     env = rms_envelope(x, )
@@ -172,12 +210,14 @@ def analyse(path):
         "start_hz": round(hz, 1),
         "start_note": note_name(midi_of(hz)) if hz else "?",
         "notes": contour(x, rate),
+        "env": env,
+        "rate": rate,
     }
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("song", help="folder under source/harmony, e.g. ama-namin")
+    ap.add_argument("song", help="folder under source/harmony, e.g. silent-night")
     ap.add_argument("--write", action="store_true",
                     help="write manifest.json and contours.json")
     ap.add_argument("--title", default=None)
@@ -229,6 +269,8 @@ def main():
         return
 
     lead_in = round(min(r["starts"] for r in res.values()), 2)
+    rate = next(iter(res.values()))["rate"]
+    bounds = shared_rests([r["env"] for r in res.values()], rate, lead_in)
     manifest = {
         "_comment": "Measured by scripts/analyze_harmony.py. Regenerate if the "
                     "recordings are replaced.",
@@ -244,10 +286,10 @@ def main():
                       "start_note": r["start_note"],
                       "start_hz": r["start_hz"]}
                   for p, r in res.items()},
-        "phrase_boundaries": [],
-        "_boundaries_note": "Gaps present in EVERY part — safe places to stop "
-                            "the ensemble without cutting a word. Empty until "
-                            "all parts are recorded.",
+        "phrase_boundaries": bounds,
+        "_boundaries_note": "Gaps present in EVERY part, in seconds from the "
+                            "first sung note — safe places to stop the "
+                            "ensemble without cutting a word.",
     }
     with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8",
               newline="\n") as f:

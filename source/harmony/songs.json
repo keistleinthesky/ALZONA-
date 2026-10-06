@@ -20,19 +20,19 @@
       ]
     },
     {
-      "id": "ama-namin",
-      "title": "Ama Namin",
-      "dir": "ama-namin",
+      "id": "silent-night",
+      "title": "Silent Night",
+      "dir": "silent-night",
       "ready": true,
       "aliases": [
-        "ama namin",
-        "our father",
-        "the lord's prayer",
-        "lords prayer",
-        "ama namen",
-        "amanamin"
+        "silent night",
+        "silent nite",
+        "stille nacht",
+        "tiha noc",
+        "noche de paz",
+        "tahimik na gabi"
       ],
-      "_parts_note": "Tenor and bass recorded so far. Soprano and alto still to come; the panel offers only the parts the manifest lists."
+      "_parts_note": "All four parts recorded. Measured by scripts/analyze_harmony.py: they agree within 0.12s, and the opening notes make a B flat major chord - B flat in the bass, D in the alto, F in the soprano."
     }
   ]
 }

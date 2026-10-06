@@ -1,0 +1,36 @@
+{
+  "_comment": "Measured by scripts/analyze_harmony.py. Regenerate if the recordings are replaced.",
+  "song": "Silent Night",
+  "duration": 111.97,
+  "sample_rate": 44100,
+  "lead_in": 3.8,
+  "_lead_in_note": "Seconds of silence before the first sung note. Playback starts here so the downbeat lands with the singer.",
+  "beats_per_bar": 4,
+  "parts": {
+    "soprano": {
+      "file": "soprano.mp3",
+      "start_note": "F4",
+      "start_hz": 351.2
+    },
+    "alto": {
+      "file": "alto.mp3",
+      "start_note": "D4",
+      "start_hz": 293.9
+    },
+    "tenor": {
+      "file": "tenor.mp3",
+      "start_note": "A#3",
+      "start_hz": 232.9
+    },
+    "bass": {
+      "file": "bass.mp3",
+      "start_note": "A#2",
+      "start_hz": 117.0
+    }
+  },
+  "phrase_boundaries": [
+    35.8,
+    71.85
+  ],
+  "_boundaries_note": "Gaps present in EVERY part, in seconds from the first sung note — safe places to stop the ensemble without cutting a word."
+}
