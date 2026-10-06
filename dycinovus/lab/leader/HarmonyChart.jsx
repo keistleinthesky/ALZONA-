@@ -42,6 +42,9 @@ export default function HarmonyChart({
   nameParts = true,
   userMidi,
   parts,
+  // The parts this song was recorded in. The key names a colour nobody can
+  // ever see, for a voice this song does not have, so it is left out.
+  available = ['soprano', 'alto', 'tenor', 'bass'],
   contours,
   playhead,
   running,
@@ -226,7 +229,7 @@ export default function HarmonyChart({
           <span className="font-semibold text-white/80">You</span>
         </span>
         {nameParts ? (
-          ['soprano', 'alto', 'tenor', 'bass'].map((p) => (
+          available.map((p) => (
             <span
               key={p}
               className={`flex items-center gap-1.5 ${

@@ -674,16 +674,24 @@ export default function Leader({
       {/* Parts — any combination */}
           <div className="mt-3">
             <p className="text-[10px] uppercase tracking-widest text-white/40">Voices</p>
-            <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-              {PARTS.map((p) => {
+            {/* Only the parts this song was recorded in. A part that cannot
+                be sung is not a choice, and showing it greyed asks the
+                singer to work out why it is there. Bahay Kubo has two, so
+                the row is two wide rather than four with half of it dead. */}
+            <div
+              className="mt-1.5 grid gap-1.5"
+              style={{
+                gridTemplateColumns:
+                  `repeat(${Math.max(1, available.length)}, minmax(0, 1fr))`,
+              }}
+            >
+              {available.map((p) => {
                 const on = parts.includes(p)
-                const missing = !available.includes(p)
                 return (
                   <button
                     key={p}
                     type="button"
-                    disabled={listening || missing}
-                    title={missing ? 'Not recorded for this song yet' : undefined}
+                    disabled={listening}
                     onClick={() => togglePart(p)}
                     style={on ? { background: PART_COLORS[p], color: '#171457' } : undefined}
                     className={`rounded-lg px-1 py-2 text-xs font-bold capitalize transition ${
@@ -703,6 +711,7 @@ export default function Leader({
           userMidi={userMidi}
           // Yours and hers. The chart shows the PITCHES, not the words.
           parts={parts}
+          available={available}
           nameParts
           contours={contours}
           playhead={playhead}
