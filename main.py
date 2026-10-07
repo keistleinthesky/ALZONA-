@@ -449,6 +449,22 @@ baybayin_path = {
     'zu': './source/BAYBAYIN/su.PNG'
 }
 
+def _video_url(path):
+    """"/media/<path>" if the footage is actually there, else None.
+
+    A dance whose file is missing should still be answered - she speaks the
+    description and skips the clip - rather than handing the console a URL
+    that 404s and leaving a dead player under a spoken answer. The Croatian
+    table already does this for a dance with no video listed; this covers
+    one that is listed but not on disk, which is what maglalatik.mp4 was:
+    named in two tables, never present.
+    """
+    if not path:
+        return None
+    full = os.path.join(BASE, "source", path.replace("\\", "/"))
+    return "/media/%s" % path.replace("\\", "/") if os.path.isfile(full) else None
+
+
 VIDEO_PATHS = {
     "tinikling": r"videos\tinikling.mp4",
     "pandanggo": r"videos\pandanggo.mp4",
@@ -3121,9 +3137,15 @@ def route_command(transcript, asked_by=""):
         if name in t:
             # English, like every dance description — see
             # _croatian_dance_reply for why.
+            url = _video_url(path)
+            if not url:
+                # Listed but not on disk. Answer anyway: the description is
+                # the part she was asked for, and a console handed a URL
+                # that 404s shows a dead player under a spoken answer.
+                return {"mode": "chat", "reply": _dance_spoken(name)}
             return {"mode": "video",
                     "reply": _dance_spoken(name),
-                    "video_url": f"/media/{path}",
+                    "video_url": url,
                     # The same thirty seconds every dance gets. A visitor
                     # watches a clip; the next one should not wait through a
                     # full performance.
@@ -3139,9 +3161,12 @@ def route_command(transcript, asked_by=""):
     # ALZONA is meant to correct cultural mistakes rather than make them — so
     # she recommends it as the dance to watch and never implies otherwise.
     if wants_festival_dance(t):
+        url = _video_url(SINGKIL_VIDEO)
+        if not url:
+            return {"mode": "chat", "reply": _FESTIVAL_SPOKEN}
         return {"mode": "video",
                 "reply": _FESTIVAL_SPOKEN,
-                "video_url": f"/media/{SINGKIL_VIDEO}",
+                "video_url": url,
                 "video_start": 0, "video_seconds": CLIP_SECONDS}
     # if ("baybayin" in t or "baybay" in t) and any(w in t for w in ["teach", "learn", "video", "tutorial", "lesson"]):
     #     return {"mode": "video", "reply": "Here is a video teaching the Baybayin script.",
