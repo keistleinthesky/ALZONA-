@@ -1,0 +1,4 @@
+A COPY of source/harmony/manifest.json
+
+Lupang Hinirang, measured. One manifest per song; the others sit in
+their own folders beside their recordings.

@@ -1,0 +1,55 @@
+{
+  "_comment": "Every song the harmony panel offers, and the names she answers to. Adding a song is an entry here plus its folder; nothing in the code needs to change.",
+  "_dir_note": "dir is the folder under source/harmony holding manifest.json, contours.json, lyrics.json, lyrics_en.txt and the part recordings. Lupang Hinirang has dir \"\" because its files sit directly in source/harmony, where the consoles on 5173 and 5174 still read them from — moving them would break those.",
+  "_ready_note": "ready false means the song is listed but has no recordings yet: the panel shows it greyed out and she says she cannot sing it rather than starting something silent.",
+  "_aliases_note": "How the song might be ASKED for, including what speech recognition tends to hear. Matched longest-first, so a two-word name wins over a one-word one it contains.",
+  "songs": [
+    {
+      "id": "lupang-hinirang",
+      "title": "Lupang Hinirang",
+      "dir": "",
+      "ready": true,
+      "aliases": [
+        "lupang hinirang",
+        "pambansang awit",
+        "national anthem",
+        "the anthem",
+        "lupang",
+        "hinirang",
+        "anthem"
+      ]
+    },
+    {
+      "id": "silent-night",
+      "title": "Silent Night",
+      "dir": "silent-night",
+      "ready": true,
+      "aliases": [
+        "silent night",
+        "silent nite",
+        "stille nacht",
+        "tiha noc",
+        "noche de paz",
+        "tahimik na gabi"
+      ],
+      "_parts_note": "All four parts recorded: they agree within 0.12s, and the opening notes make a B flat major chord - B flat in the bass, D in the alto, F in the soprano. The recording has three verses; ends_at stops it at the end of the second, which is a rest every part shares, so nothing is cut off mid-note. lyrics.json carries those two verses only.",
+      "ends_at": 71.85
+    },
+    {
+      "id": "bahay-kubo",
+      "title": "Bahay Kubo",
+      "dir": "bahay-kubo",
+      "ready": true,
+      "aliases": [
+        "bahay kubo",
+        "bahaykubo",
+        "bahay cubo",
+        "buhay kubo",
+        "nipa hut",
+        "kubo"
+      ],
+      "_parts_note": "Soprano C5 and alto E4, both as sung with nothing cut. They line up: 0.06s offset, every third within 0.08s, sung lengths 0.02s apart. The soprano arrived 12x under level; plain gain stopped at 5.6x on one loud moment, so it is brought up 8x through a soft knee at 0.70 instead, reaching 0.20 to match the alto. That costs a little tracking - 9 of 14 windows read as one voice against 13 of 14 before - because the noise under the voice comes up with it. The take sings only as far as 'sitaw, bataw, patani'."
+    }
+  ],
+  "_ends_at_note": "ends_at stops a song before its recording does, in seconds from the first sung note. Omit it and the take runs until the singer stops."
+}

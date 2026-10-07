@@ -1,0 +1,4 @@
+A COPY of source/harmony/songs.json
+
+Every song, the names she answers to, which parts exist, and where a
+song stops if not at the end of its recording.
